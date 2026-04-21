@@ -1,0 +1,9 @@
+[package]
+name = "zoetrope"
+version = "0.1.0"
+edition = "2021"
+description = "Convert .mov files to high-quality gifs using ffmpeg"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
