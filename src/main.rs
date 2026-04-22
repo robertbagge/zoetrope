@@ -109,10 +109,16 @@ fn main() {
 }
 
 fn check_ffmpeg() {
-    let status = Command::new("ffmpeg").arg("-version").output();
-    if status.is_err() {
-        eprintln!("error: ffmpeg not found — install it with `brew install ffmpeg`");
-        process::exit(1);
+    match Command::new("ffmpeg").arg("-version").output() {
+        Ok(output) if output.status.success() => {}
+        Ok(_) => {
+            eprintln!("error: ffmpeg found but returned an error");
+            process::exit(1);
+        }
+        Err(_) => {
+            eprintln!("error: ffmpeg not found — install it with `brew install ffmpeg`");
+            process::exit(1);
+        }
     }
 }
 
