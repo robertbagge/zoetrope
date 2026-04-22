@@ -8,6 +8,7 @@ enum Quality {
     Low,
     Medium,
     High,
+    Ultra,
 }
 
 impl Quality {
@@ -16,6 +17,7 @@ impl Quality {
             Quality::Low => 480,
             Quality::Medium => 960,
             Quality::High => 1440,
+            Quality::Ultra => 2048,
         }
     }
 
@@ -24,6 +26,7 @@ impl Quality {
             Quality::Low => 8,
             Quality::Medium => 12,
             Quality::High => 15,
+            Quality::Ultra => 24,
         }
     }
 }
@@ -40,7 +43,7 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Quality preset: low (480p/8fps), medium (960p/12fps), high (1440p/15fps)
+    /// Quality preset: low (480p/8fps), medium (960p/12fps), high (1440p/15fps), ultra (2K/24fps)
     #[arg(short, long, default_value = "medium")]
     quality: Quality,
 
