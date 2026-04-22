@@ -60,6 +60,8 @@ jobs:
   build:
     needs: release
     if: needs.release.outputs.tag != ''
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
