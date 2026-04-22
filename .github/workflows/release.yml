@@ -4,13 +4,30 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  release-plz:
+  release-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
+        with:
+          command: release-pr
+          version: "0.3.157"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.extract.outputs.tag }}
     steps:
@@ -35,8 +52,8 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: release-plz
-    if: needs.release-plz.outputs.tag != ''
+    needs: release
+    if: needs.release.outputs.tag != ''
     strategy:
       matrix:
         include:
@@ -48,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ needs.release-plz.outputs.tag }}
+          ref: ${{ needs.release.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -60,28 +77,28 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../zoetrope-${{ needs.release-plz.outputs.tag }}-${{ matrix.target }}.tar.gz zoetrope
+          tar czf ../../../zoetrope-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz zoetrope
           cd ../../..
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.release-plz.outputs.tag }} \
-            zoetrope-${{ needs.release-plz.outputs.tag }}-${{ matrix.target }}.tar.gz
+          gh release upload ${{ needs.release.outputs.tag }} \
+            zoetrope-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz
 
   update-homebrew:
-    needs: [release-plz, build]
+    needs: [release, build]
+    if: needs.release.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets and update tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          TAG="${{ needs.release-plz.outputs.tag }}"
+          TAG="${{ needs.release.outputs.tag }}"
           VERSION="${TAG#v}"
 
-          # Download both tarballs and compute checksums
           gh release download "$TAG" --repo robertbagge/zoetrope \
             --pattern "zoetrope-${TAG}-aarch64-apple-darwin.tar.gz" \
             --pattern "zoetrope-${TAG}-x86_64-apple-darwin.tar.gz"
@@ -89,41 +106,37 @@ jobs:
           SHA_ARM=$(shasum -a 256 "zoetrope-${TAG}-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)
           SHA_INTEL=$(shasum -a 256 "zoetrope-${TAG}-x86_64-apple-darwin.tar.gz" | cut -d' ' -f1)
 
-          # Clone tap repo and update formula
           git clone https://x-access-token:${GH_TOKEN}@github.com/robertbagge/homebrew-tap.git tap
           cd tap
 
           cat > Formula/zoetrope.rb << FORMULA
-          class Zoetrope < Formula
-            desc "Convert .mov files to high-quality gifs using ffmpeg"
-            homepage "https://github.com/robertbagge/zoetrope"
-            version "${VERSION}"
-            license "MIT"
+class Zoetrope < Formula
+  desc "Convert .mov files to high-quality gifs using ffmpeg"
+  homepage "https://github.com/robertbagge/zoetrope"
+  version "${VERSION}"
+  license "MIT"
 
-            depends_on "ffmpeg"
+  depends_on "ffmpeg"
 
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-aarch64-apple-darwin.tar.gz"
-                sha256 "${SHA_ARM}"
-              elsif Hardware::CPU.intel?
-                url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-x86_64-apple-darwin.tar.gz"
-                sha256 "${SHA_INTEL}"
-              end
-            end
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-aarch64-apple-darwin.tar.gz"
+      sha256 "${SHA_ARM}"
+    elsif Hardware::CPU.intel?
+      url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-x86_64-apple-darwin.tar.gz"
+      sha256 "${SHA_INTEL}"
+    end
+  end
 
-            def install
-              bin.install "zoetrope"
-            end
+  def install
+    bin.install "zoetrope"
+  end
 
-            test do
-              assert_match "Convert .mov files", shell_output("#{bin}/zoetrope --help")
-            end
-          end
-          FORMULA
-
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' Formula/zoetrope.rb
+  test do
+    assert_match "Convert .mov files", shell_output("#{bin}/zoetrope --help")
+  end
+end
+FORMULA
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
