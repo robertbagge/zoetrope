@@ -82,17 +82,22 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../zoetrope-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz zoetrope
+          cd target/${TARGET}/release
+          tar czf ../../../zoetrope-${TAG}-${TARGET}.tar.gz zoetrope
           cd ../../..
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          TARGET: ${{ matrix.target }}
         run: |
-          gh release upload ${{ needs.release.outputs.tag }} \
-            zoetrope-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz
+          gh release upload "$TAG" \
+            "zoetrope-${TAG}-${TARGET}.tar.gz"
 
   update-homebrew:
     needs: [release, build]
