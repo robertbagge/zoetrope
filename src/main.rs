@@ -30,6 +30,7 @@ impl Quality {
 
 #[derive(Parser)]
 #[command(name = "zoetrope")]
+#[command(version)]
 #[command(about = "Convert .mov files to high-quality gifs using ffmpeg")]
 struct Args {
     /// Input .mov file
