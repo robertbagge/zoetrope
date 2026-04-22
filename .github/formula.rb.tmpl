@@ -1,20 +1,13 @@
 class Zoetrope < Formula
   desc "Convert .mov files to high-quality gifs using ffmpeg"
   homepage "https://github.com/robertbagge/zoetrope"
+  url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-aarch64-apple-darwin.tar.gz"
+  sha256 "${SHA}"
   version "${VERSION}"
   license "MIT"
 
+  depends_on arch: :arm64
   depends_on "ffmpeg"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-aarch64-apple-darwin.tar.gz"
-      sha256 "${SHA_ARM}"
-    elsif Hardware::CPU.intel?
-      url "https://github.com/robertbagge/zoetrope/releases/download/${TAG}/zoetrope-${TAG}-x86_64-apple-darwin.tar.gz"
-      sha256 "${SHA_INTEL}"
-    end
-  end
 
   def install
     bin.install "zoetrope"
