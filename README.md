@@ -8,6 +8,17 @@ A fast CLI that converts `.mov` screen recordings into high-quality gifs using f
 
 ## Install
 
+### Homebrew (recommended)
+
+```sh
+brew tap robertbagge/tap
+brew install zoetrope
+```
+
+This installs ffmpeg automatically as a dependency.
+
+### From source
+
 Requires [ffmpeg](https://ffmpeg.org/) (`brew install ffmpeg` on macOS).
 
 ```sh

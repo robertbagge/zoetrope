@@ -15,7 +15,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
 
       - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
         with:
@@ -35,7 +37,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
 
       - id: release
         uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
@@ -47,8 +51,10 @@ jobs:
 
       - id: extract
         if: steps.release.outputs.releases_created == 'true'
+        env:
+          RELEASES: ${{ steps.release.outputs.releases }}
         run: |
-          TAG=$(echo '${{ steps.release.outputs.releases }}' | jq -r '.[0].tag')
+          TAG=$(echo "$RELEASES" | jq -r '.[0].tag')
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
@@ -67,8 +73,9 @@ jobs:
         with:
           ref: ${{ needs.release.outputs.tag }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Build
@@ -110,7 +117,7 @@ jobs:
 
           git clone "https://x-access-token:${GH_TOKEN}@github.com/robertbagge/homebrew-tap.git" tap
 
-          envsubst < .github/formula.rb.tmpl > tap/Formula/zoetrope.rb
+          envsubst '${VERSION} ${TAG} ${SHA_ARM} ${SHA_INTEL}' < .github/formula.rb.tmpl > tap/Formula/zoetrope.rb
 
           cd tap
           git config user.name "github-actions[bot]"
