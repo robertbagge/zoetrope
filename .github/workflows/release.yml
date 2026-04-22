@@ -12,7 +12,7 @@ jobs:
   release-plz:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.release.outputs.tag }}
+      tag: ${{ steps.extract.outputs.tag }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -27,6 +27,12 @@ jobs:
           version: "0.3.157"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: extract
+        if: steps.release.outputs.releases_created == 'true'
+        run: |
+          TAG=$(echo '${{ steps.release.outputs.releases }}' | jq -r '.[0].tag')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
     needs: release-plz
