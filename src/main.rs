@@ -104,11 +104,13 @@ fn main() {
 
     drop(palette);
 
-    let size = std::fs::metadata(&output)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
 
-    eprintln!("done: {} ({:.1} MB)", output.display(), size as f64 / 1_048_576.0);
+    eprintln!(
+        "done: {} ({:.1} MB)",
+        output.display(),
+        size as f64 / 1_048_576.0
+    );
 }
 
 fn check_ffmpeg() {
