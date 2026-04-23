@@ -8,3 +8,8 @@ publish = false
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+gif = "0.13"
