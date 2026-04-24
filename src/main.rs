@@ -5,6 +5,7 @@ mod cli;
 mod encode;
 mod fit;
 mod pipeline;
+mod progress;
 
 fn main() -> ExitCode {
     match run() {

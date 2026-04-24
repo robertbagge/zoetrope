@@ -1,10 +1,12 @@
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 
 use tempfile::TempDir;
 
 use crate::cli::{Options, Playback};
+use crate::progress::{ffmpeg_bar, probe_duration, GifskiBar};
 
 /// Tunable parameters the fit loop can vary between attempts.
 /// Kept separate from `Options` so the loop can retry with different values
@@ -21,8 +23,11 @@ pub(crate) fn encode_gif(opts: &Options, params: &EncodeParams) -> Result<(), St
     let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
     let png_pattern = tmp.path().join("frame_%06d.png");
 
-    eprintln!("extracting frames... ({}px, {}fps)", params.width, params.fps);
-    extract_png_frames(opts, params, &png_pattern)?;
+    let total_us = effective_duration_us(opts);
+    let bar = ffmpeg_bar(total_us, "extracting");
+
+    extract_png_frames(opts, params, &png_pattern, &bar)?;
+    bar.finish_and_clear();
 
     let mut pngs: Vec<PathBuf> = std::fs::read_dir(tmp.path())
         .map_err(|e| format!("read frame dir: {e}"))?
@@ -35,18 +40,51 @@ pub(crate) fn encode_gif(opts: &Options, params: &EncodeParams) -> Result<(), St
         return Err("ffmpeg produced no frames (check trim/speed settings)".into());
     }
 
-    eprintln!("encoding gif... ({} frames)", pngs.len());
     encode_gif_with_gifski(pngs, &opts.output, params.width, params.fps, params.quality)
 }
 
 pub(crate) fn encode_webp(opts: &Options, params: &EncodeParams) -> Result<(), String> {
-    eprintln!("encoding webp... ({}px, {}fps)", params.width, params.fps);
+    let total_us = effective_duration_us(opts);
+    let bar = ffmpeg_bar(total_us, "encoding");
+
     let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
     cmd.args(["-c:v", "libwebp"]);
     cmd.args(["-loop", "0"]);
     cmd.args(["-quality", &params.quality.to_string()]);
     cmd.arg(&opts.output);
-    run_ffmpeg(cmd, "webp encoding")
+
+    let res = run_ffmpeg_with_progress(cmd, "webp encoding", &bar);
+    bar.finish_and_clear();
+    res
+}
+
+/// Effective duration of the encoded *output* in microseconds. ffmpeg's
+/// `-progress` reports `out_time_us` which advances in output time, so:
+///   - trim shortens it (min(clip_duration, duration))
+///   - --speed 2 halves it
+///   - boomerang doubles it
+fn effective_duration_us(opts: &Options) -> Option<u64> {
+    let probe = probe_duration(&opts.input);
+    let start = opts.start.unwrap_or(0.0);
+    let after_start = probe.map(|d| (d - start).max(0.0));
+    let clip = match (after_start, opts.duration) {
+        (Some(a), Some(d)) => Some(a.min(d)),
+        (Some(a), None) => Some(a),
+        (None, Some(d)) => Some(d),
+        (None, None) => None,
+    }?;
+
+    let speed_adjusted = clip / opts.speed.unwrap_or(1.0);
+    let playback_factor = match opts.playback {
+        Playback::Boomerang => 2.0,
+        _ => 1.0,
+    };
+    let us = speed_adjusted * playback_factor * 1_000_000.0;
+    if us.is_finite() && us > 0.0 {
+        Some(us as u64)
+    } else {
+        None
+    }
 }
 
 /// Builds the ffmpeg command shared by PNG extraction and WebP encoding:
@@ -73,11 +111,12 @@ fn extract_png_frames(
     opts: &Options,
     params: &EncodeParams,
     pattern: &Path,
+    bar: &indicatif::ProgressBar,
 ) -> Result<(), String> {
     let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
     cmd.args(["-start_number", "0"]);
     cmd.arg(pattern);
-    run_ffmpeg(cmd, "frame extraction")
+    run_ffmpeg_with_progress(cmd, "frame extraction", bar)
 }
 
 fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Playback) -> String {
@@ -99,10 +138,34 @@ fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Pla
     chain
 }
 
-fn run_ffmpeg(mut cmd: Command, stage: &str) -> Result<(), String> {
-    let output = cmd
-        .output()
+/// Run ffmpeg with `-progress pipe:1 -nostats`, streaming `out_time_us=N`
+/// key-value lines and ticking the progress bar. Returns the usual
+/// success/stderr-on-failure contract.
+fn run_ffmpeg_with_progress(
+    mut cmd: Command,
+    stage: &str,
+    bar: &indicatif::ProgressBar,
+) -> Result<(), String> {
+    cmd.args(["-progress", "pipe:1", "-nostats"]);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("failed to run ffmpeg: {e}"))?;
+
+    let stdout = child.stdout.take().ok_or("ffmpeg stdout missing")?;
+    let reader = BufReader::new(stdout);
+    for line in reader.lines().map_while(Result::ok) {
+        if let Some(rest) = line.strip_prefix("out_time_us=") {
+            if let Ok(us) = rest.trim().parse::<u64>() {
+                bar.set_position(us);
+            }
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("ffmpeg wait: {e}"))?;
     if !output.status.success() {
         return Err(format!(
             "ffmpeg {stage} failed:\n{}",
@@ -119,7 +182,7 @@ fn encode_gif_with_gifski(
     fps: u32,
     quality: u8,
 ) -> Result<(), String> {
-    use gifski::{progress::NoProgress, Repeat, Settings};
+    use gifski::{Repeat, Settings};
 
     let settings = Settings {
         width: Some(width),
@@ -147,9 +210,11 @@ fn encode_gif_with_gifski(
             Ok(())
         });
 
+        let mut reporter = GifskiBar::new();
         let write_result = writer
-            .write(file, &mut NoProgress {})
+            .write(file, &mut reporter)
             .map_err(|e| format!("write gif: {e}"));
+        reporter.inner().finish_and_clear();
 
         let collect_result = collector_handle
             .join()

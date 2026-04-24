@@ -37,8 +37,31 @@ zoetrope demo.mov --start 1:30 --duration 10s
 zoetrope demo.mov --speed 2                 # 2x speedup
 zoetrope demo.mov --playback boomerang      # forward then reverse
 zoetrope demo.mov -q high --fps 24          # preset + manual override
+zoetrope demo.mov --max-size 500kb          # shrink until it fits
+zoetrope demo.mov --for slack               # platform preset with auto-fit
 zoetrope demo.mov --force                   # overwrite existing output
 ```
+
+## Smart Sizing
+
+`--max-size <SIZE>` iteratively shrinks the output until it fits. Accepts
+`5mb`, `500kb`, `2gb`, or raw bytes. Sizes are decimal (1 mb = 1,000,000 bytes)
+to match how GitHub, Slack, and Discord document their upload limits. Capped
+at 5 attempts.
+
+`--for <PLATFORM>` applies a platform preset (dimensions + size limit + encoder
+quality) and enables auto-fit:
+
+| Platform  | Size cap  | Width  | FPS | Encoder q |
+|-----------|-----------|--------|-----|-----------|
+| `slack`   | 5 MB      | 480px  | 10  | 80        |
+| `github`  | 10 MB     | 960px  | 12  | 85        |
+| `discord` | 8 MB      | 640px  | 12  | 80        |
+| `twitter` | 5 MB      | 480px  | 10  | 80        |
+| `email`   | 500 KB    | 320px  | 8   | 75        |
+
+Platform presets lock the format to GIF. `--fps`, `--width`, `--max-size`, and
+`-q` all override the preset when supplied.
 
 ## Quality Presets
 
