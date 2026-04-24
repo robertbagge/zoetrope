@@ -4,7 +4,7 @@
 
 ---
 
-A fast CLI that converts `.mov` screen recordings into high-quality gifs using ffmpeg's two-pass palette technique.
+A fast CLI that converts screen recordings into high-quality GIFs (via [gifski](https://gif.ski)) or animated WebP (via ffmpeg/libwebp).
 
 ## Install
 
@@ -19,7 +19,8 @@ This installs ffmpeg automatically as a dependency.
 
 ### From source
 
-Requires [ffmpeg](https://ffmpeg.org/) (`brew install ffmpeg` on macOS).
+Requires [ffmpeg](https://ffmpeg.org/) with libwebp support if you want WebP output
+(`brew install ffmpeg-full` on macOS; the standard `ffmpeg` package on Ubuntu includes it).
 
 ```sh
 cargo install --path .
@@ -28,29 +29,33 @@ cargo install --path .
 ## Usage
 
 ```sh
-zoetrope recording.mov                     # → recording.gif (medium quality)
-zoetrope recording.mov -q high             # 1440px, 15fps
-zoetrope recording.mov -q low              # 480px, 8fps — small files
-zoetrope recording.mov -o demo.gif         # custom output path
-zoetrope recording.mov -q high --fps 24    # preset + manual override
-zoetrope recording.mov --force             # overwrite existing output
+zoetrope demo.mov                           # → demo.gif (medium quality)
+zoetrope demo.mp4 -q high                   # mp4/webm/mkv/avi also supported
+zoetrope demo.mov -F webp                   # → demo.webp (2-5x smaller)
+zoetrope demo.mov --start 5s --end 12s      # trim to a 7-second clip
+zoetrope demo.mov --start 1:30 --duration 10s
+zoetrope demo.mov --speed 2                 # 2x speedup
+zoetrope demo.mov --playback boomerang      # forward then reverse
+zoetrope demo.mov -q high --fps 24          # preset + manual override
+zoetrope demo.mov --force                   # overwrite existing output
 ```
 
 ## Quality Presets
 
-| Preset | Width | FPS | Best for |
-|--------|-------|-----|----------|
-| `low` | 480px | 8 | Slack, quick shares |
-| `medium` | 960px | 12 | GitHub PRs, docs |
-| `high` | 1440px | 15 | Presentations, LinkedIn |
+| Preset | Width  | FPS | Best for |
+|--------|--------|-----|----------|
+| `low`     | 480px  | 8  | Slack, quick shares |
+| `medium`  | 960px  | 12 | GitHub PRs, docs |
+| `high`    | 1440px | 15 | Presentations, LinkedIn |
+| `ultra`   | 2048px | 24 | Demo reels, high-fidelity |
 
-`--fps` and `--width` flags override the preset values when you need fine control.
+`--fps` and `--width` override the preset when you need fine control.
 
 ## How It Works
 
-Single-pass gif encoding uses a generic 256-color palette, which produces muddy colors and visible banding. Zoetrope runs ffmpeg twice:
+For GIF output, zoetrope runs ffmpeg to decode, trim, speed-adjust, scale, and
+extract PNG frames, then hands them to [gifski](https://gif.ski) — which gives
+each frame its own palette with temporal dithering. The result is sharper and
+closer to the source than ffmpeg's single-palette output.
 
-1. **Pass 1** — Analyzes the video and generates an optimized 256-color palette tuned to the actual content
-2. **Pass 2** — Encodes the gif using that palette with Bayer dithering for smooth gradients
-
-The difference is significant, especially for screen recordings with UI elements and text.
+For WebP output, a single ffmpeg pass encodes directly with libwebp.

@@ -3,11 +3,13 @@ use predicates::prelude::*;
 use tempfile::TempDir;
 
 mod common;
-use common::{decode_gif, fixture, mov_fixture};
+use common::{decode_gif, fixture, libwebp_available, mov_fixture};
 
 fn zoetrope() -> Command {
     Command::cargo_bin("zoetrope").expect("binary not built")
 }
+
+// ─── Input formats ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_mov_input_produces_gif() {
@@ -23,6 +25,38 @@ fn test_mov_input_produces_gif() {
 }
 
 #[test]
+fn test_mp4_input_produces_gif() {
+    assert_format_produces_gif("mp4");
+}
+
+#[test]
+fn test_webm_input_produces_gif() {
+    assert_format_produces_gif("webm");
+}
+
+#[test]
+fn test_mkv_input_produces_gif() {
+    assert_format_produces_gif("mkv");
+}
+
+#[test]
+fn test_avi_input_produces_gif() {
+    assert_format_produces_gif("avi");
+}
+
+fn assert_format_produces_gif(ext: &str) {
+    let dir = TempDir::new().unwrap();
+    let input = fixture(dir.path(), "in", ext);
+    let output = dir.path().join("in.gif");
+
+    zoetrope().arg(&input).assert().success();
+
+    assert!(output.exists(), "output gif should exist for {ext}");
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(size > 0, "output gif should be non-empty for {ext}");
+}
+
+#[test]
 fn test_missing_input_errors() {
     let dir = TempDir::new().unwrap();
     let input = dir.path().join("nope.mov");
@@ -35,21 +69,7 @@ fn test_missing_input_errors() {
 }
 
 #[test]
-fn test_non_mov_extension_errors() {
-    let dir = TempDir::new().unwrap();
-    // Create an empty .mp4 file (extension check runs before ffmpeg)
-    let input = dir.path().join("not-mov.mp4");
-    std::fs::write(&input, b"").unwrap();
-
-    zoetrope()
-        .arg(&input)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("must be a .mov"));
-}
-
-#[test]
-fn test_png_extension_errors() {
+fn test_unsupported_extension_errors() {
     let dir = TempDir::new().unwrap();
     let input = dir.path().join("image.png");
     std::fs::write(&input, b"").unwrap();
@@ -58,8 +78,13 @@ fn test_png_extension_errors() {
         .arg(&input)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("must be a .mov"));
+        .stderr(predicate::str::contains("input must be one of:"))
+        .stderr(predicate::str::contains("mov"))
+        .stderr(predicate::str::contains("mp4"))
+        .stderr(predicate::str::contains("webm"));
 }
+
+// ─── Quality presets ────────────────────────────────────────────────────────
 
 #[test]
 fn test_quality_preset_low() {
@@ -120,6 +145,8 @@ fn test_quality_preset_ultra() {
     let (w, _, _) = decode_gif(&dir.path().join("in.gif"));
     assert_eq!(w, 2048, "ultra preset width");
 }
+
+// ─── Overrides ──────────────────────────────────────────────────────────────
 
 #[test]
 fn test_fps_override() {
@@ -204,10 +231,242 @@ fn test_force_overwrites() {
     );
 }
 
+// ─── Trimming ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_start_trim_reduces_duration() {
+    // 2s fixture @ 12fps (medium) = ~24 frames.
+    // --start 1s cuts first second → ~12 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--start", "1s"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (8..=16).contains(&frames),
+        "expected ~12 frames after 1s trim, got {frames}"
+    );
+}
+
+#[test]
+fn test_end_trim_reduces_duration() {
+    // --end 1s keeps only first second → ~12 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--end", "1s"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (8..=16).contains(&frames),
+        "expected ~12 frames with --end 1s, got {frames}"
+    );
+}
+
+#[test]
+fn test_duration_flag() {
+    // --start 0s --duration 1s → 1s of video → ~12 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--start", "0s", "--duration", "1s"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (8..=16).contains(&frames),
+        "expected ~12 frames over 1s duration, got {frames}"
+    );
+}
+
+#[test]
+fn test_end_and_duration_conflict_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--end", "1s", "--duration", "1s"])
+        .assert()
+        .failure();
+}
+
+// ─── WebP ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_webp_output_produces_valid_file() {
+    if !libwebp_available() {
+        eprintln!("skipping: ffmpeg built without libwebp");
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "webp"])
+        .assert()
+        .success();
+
+    assert!(output.exists(), "webp output should exist");
+    let bytes = std::fs::read(&output).unwrap();
+    assert!(bytes.len() >= 12, "webp too small to contain magic header");
+    assert_eq!(&bytes[0..4], b"RIFF", "webp should start with RIFF");
+    assert_eq!(&bytes[8..12], b"WEBP", "webp should contain WEBP magic");
+}
+
+#[test]
+fn test_webp_default_extension() {
+    if !libwebp_available() {
+        eprintln!("skipping: ffmpeg built without libwebp");
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "webp"])
+        .assert()
+        .success();
+
+    assert!(
+        dir.path().join("in.webp").exists(),
+        "webp default output should exist"
+    );
+    assert!(
+        !dir.path().join("in.gif").exists(),
+        "gif should not be created when -F webp is used"
+    );
+}
+
+#[test]
+fn test_webp_missing_encoder_errors_cleanly() {
+    if libwebp_available() {
+        eprintln!("skipping: libwebp is available, so this error path is unreachable");
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("libwebp"));
+}
+
+// ─── Speed ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_speed_2x_halves_frames() {
+    // 2s fixture @ 12fps baseline = ~24 frames. At 2x → ~12 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--speed", "2"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (8..=16).contains(&frames),
+        "expected ~12 frames at 2x speed, got {frames}"
+    );
+}
+
+#[test]
+fn test_speed_half_increases_frames() {
+    // 2s fixture @ 12fps baseline = ~24 frames. At 0.5x → ~48 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--speed", "0.5"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (40..=56).contains(&frames),
+        "expected ~48 frames at 0.5x speed, got {frames}"
+    );
+}
+
+#[test]
+fn test_speed_rejects_zero() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--speed", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--speed"));
+}
+
+// ─── Playback modes ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_reverse_runs() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--playback", "reverse"])
+        .assert()
+        .success();
+
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(size > 0, "reverse output should be non-empty");
+}
+
+#[test]
+fn test_boomerang_doubles_frames() {
+    // 2s fixture @ 12fps baseline = ~24 frames. Boomerang → ~48 frames.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--playback", "boomerang"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert!(
+        (40..=56).contains(&frames),
+        "expected ~48 frames for boomerang (2x baseline), got {frames}"
+    );
+}
+
+// ─── Fixture helper sanity check ────────────────────────────────────────────
+
 #[test]
 fn test_fixture_helper_generates_other_formats() {
-    // Verifies the fixture helper works for MP4/WebM/MKV/AVI so Chunk 1 can
-    // wire up positive tests without plumbing changes.
     let dir = TempDir::new().unwrap();
     for ext in ["mp4", "webm", "mkv", "avi"] {
         let path = fixture(dir.path(), "probe", ext);
