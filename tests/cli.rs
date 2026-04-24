@@ -463,6 +463,92 @@ fn test_boomerang_doubles_frames() {
     );
 }
 
+// ─── Format inference from --output extension ──────────────────────────────
+
+#[test]
+fn test_output_extension_infers_webp_format() {
+    if !libwebp_available() {
+        eprintln!("skipping: ffmpeg built without libwebp");
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let custom = dir.path().join("custom.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["-o".as_ref(), custom.as_os_str()])
+        .assert()
+        .success();
+
+    let bytes = std::fs::read(&custom).unwrap();
+    assert!(bytes.len() >= 12, "output too small");
+    assert_eq!(
+        &bytes[0..4],
+        b"RIFF",
+        "output should be webp when -o is .webp"
+    );
+    assert_eq!(
+        &bytes[8..12],
+        b"WEBP",
+        "output should be webp when -o is .webp"
+    );
+}
+
+#[test]
+fn test_format_and_output_extension_mismatch_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let custom = dir.path().join("out.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "gif"])
+        .args(["-o".as_ref(), custom.as_os_str()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("conflicts"))
+        .stderr(predicate::str::contains(".webp"));
+}
+
+// ─── Cross-feature integration ──────────────────────────────────────────────
+
+#[test]
+fn test_kitchen_sink_trim_speed_boomerang_width() {
+    // 2s fixture @ 30fps.
+    // --start 0.5s → 1.5s remaining
+    // --speed 2   → 0.75s
+    // boomerang   → 1.5s
+    // --fps 10    → ~15 frames at 400px
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args([
+            "--start",
+            "0.5s",
+            "--speed",
+            "2",
+            "--playback",
+            "boomerang",
+            "--fps",
+            "10",
+            "--width",
+            "400",
+        ])
+        .assert()
+        .success();
+
+    let (w, _, frames) = decode_gif(&dir.path().join("in.gif"));
+    assert_eq!(w, 400, "width should honor --width override");
+    assert!(
+        (10..=20).contains(&frames),
+        "expected ~15 frames (1.5s @ 10fps boomeranged), got {frames}"
+    );
+}
+
 // ─── Fixture helper sanity check ────────────────────────────────────────────
 
 #[test]
