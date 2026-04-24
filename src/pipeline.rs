@@ -42,15 +42,10 @@ pub(crate) fn encode(opts: &Options, params: &EncodeParams) -> Result<(), String
 }
 
 pub(crate) fn initial_params(opts: &Options) -> EncodeParams {
-    let q = opts.quality.settings();
-    let quality = match opts.format {
-        Format::Gif => q.gifski_quality,
-        Format::Webp => q.webp_quality,
-    };
     EncodeParams {
         width: opts.width,
         fps: opts.fps,
-        quality,
+        quality: opts.encoder_quality,
     }
 }
 

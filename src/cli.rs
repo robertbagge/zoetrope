@@ -80,6 +80,64 @@ pub(crate) enum Playback {
     Boomerang,
 }
 
+#[derive(Clone, ValueEnum, PartialEq, Eq)]
+pub(crate) enum Platform {
+    /// ≤5 MB, 480px, 10fps — tight for chat
+    Slack,
+    /// ≤10 MB, 960px, 12fps — PR/issue attachments
+    Github,
+    /// ≤8 MB, 640px, 12fps
+    Discord,
+    /// ≤5 MB, 480px, 10fps
+    Twitter,
+    /// ≤500 KB, 320px, 8fps — inline-friendly
+    Email,
+}
+
+pub(crate) struct PlatformSettings {
+    pub max_size: u64,
+    pub width: u32,
+    pub fps: u32,
+    pub gifski_quality: u8,
+}
+
+impl Platform {
+    pub(crate) fn settings(&self) -> PlatformSettings {
+        match self {
+            Platform::Slack => PlatformSettings {
+                max_size: 5_000_000,
+                width: 480,
+                fps: 10,
+                gifski_quality: 80,
+            },
+            Platform::Github => PlatformSettings {
+                max_size: 10_000_000,
+                width: 960,
+                fps: 12,
+                gifski_quality: 85,
+            },
+            Platform::Discord => PlatformSettings {
+                max_size: 8_000_000,
+                width: 640,
+                fps: 12,
+                gifski_quality: 80,
+            },
+            Platform::Twitter => PlatformSettings {
+                max_size: 5_000_000,
+                width: 480,
+                fps: 10,
+                gifski_quality: 80,
+            },
+            Platform::Email => PlatformSettings {
+                max_size: 500_000,
+                width: 320,
+                fps: 8,
+                gifski_quality: 75,
+            },
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "zoetrope")]
 #[command(version)]
@@ -96,9 +154,9 @@ pub(crate) struct Args {
     #[arg(short = 'F', long)]
     pub format: Option<Format>,
 
-    /// Quality preset
-    #[arg(short, long, default_value = "medium")]
-    pub quality: Quality,
+    /// Quality preset [default: medium]
+    #[arg(short, long)]
+    pub quality: Option<Quality>,
 
     /// Frame rate (overrides quality preset)
     #[arg(long)]
@@ -115,6 +173,11 @@ pub(crate) struct Args {
     /// Playback mode
     #[arg(long, default_value = "normal")]
     pub playback: Playback,
+
+    /// Platform preset (slack, github, discord, twitter, email). Locks format=gif
+    /// and enforces a size limit; explicit --fps/--width/--max-size override.
+    #[arg(long = "for")]
+    pub for_: Option<Platform>,
 
     /// Start time (e.g. 5s, 1:30, 1:30:45)
     #[arg(long)]
@@ -143,7 +206,10 @@ pub(crate) struct Options {
     pub input: PathBuf,
     pub output: PathBuf,
     pub format: Format,
-    pub quality: Quality,
+    /// Encoder quality knob (0-100). For GIF this is gifski_quality;
+    /// for WebP it's libwebp's quality. Already resolved from --quality,
+    /// platform preset, and defaults.
+    pub encoder_quality: u8,
     pub fps: u32,
     pub width: u32,
     pub speed: Option<f64>,
@@ -221,15 +287,63 @@ impl Args {
             (None, None) => Format::Gif,
         };
 
-        let quality_settings = self.quality.settings();
-        let fps = self.fps.unwrap_or(quality_settings.fps);
-        let width = self.width.unwrap_or(quality_settings.width);
+        // Platform presets lock to GIF. Reject explicit or inferred WebP
+        // rather than silently ignoring it.
+        if let (Some(platform), Format::Webp) = (self.for_.as_ref(), &format) {
+            return Err(format!(
+                "--for {} produces GIF; drop --format webp (or the .webp output path)",
+                platform_name(platform),
+            ));
+        }
 
-        let max_size = self
+        let platform_defaults = self.for_.as_ref().map(|p| p.settings());
+
+        // Width/fps: explicit flag > quality preset (if user set -q) > platform > quality-medium.
+        let quality_preset = self.quality.clone().unwrap_or(Quality::Medium);
+        let q_set = self.quality.is_some();
+        let quality_settings = quality_preset.settings();
+
+        let preset_width = if q_set {
+            quality_settings.width
+        } else {
+            platform_defaults
+                .as_ref()
+                .map(|p| p.width)
+                .unwrap_or(quality_settings.width)
+        };
+        let preset_fps = if q_set {
+            quality_settings.fps
+        } else {
+            platform_defaults
+                .as_ref()
+                .map(|p| p.fps)
+                .unwrap_or(quality_settings.fps)
+        };
+        let width = self.width.unwrap_or(preset_width);
+        let fps = self.fps.unwrap_or(preset_fps);
+
+        let explicit_max = self
             .max_size
             .as_deref()
             .map(parse_size_arg)
             .transpose()?;
+        let max_size = explicit_max.or_else(|| platform_defaults.as_ref().map(|p| p.max_size));
+
+        // Encoder quality: explicit -q wins; else platform's (GIF only, since
+        // --for locks to GIF); else quality preset's default for the format.
+        let encoder_quality = if q_set {
+            match format {
+                Format::Gif => quality_settings.gifski_quality,
+                Format::Webp => quality_settings.webp_quality,
+            }
+        } else if let Some(p) = &platform_defaults {
+            p.gifski_quality
+        } else {
+            match format {
+                Format::Gif => quality_settings.gifski_quality,
+                Format::Webp => quality_settings.webp_quality,
+            }
+        };
 
         let output = self
             .output
@@ -246,7 +360,7 @@ impl Args {
             input: self.input,
             output,
             format,
-            quality: self.quality,
+            encoder_quality,
             fps,
             width,
             speed: self.speed,
@@ -255,6 +369,16 @@ impl Args {
             duration: trim_duration,
             max_size,
         })
+    }
+}
+
+fn platform_name(p: &Platform) -> &'static str {
+    match p {
+        Platform::Slack => "slack",
+        Platform::Github => "github",
+        Platform::Discord => "discord",
+        Platform::Twitter => "twitter",
+        Platform::Email => "email",
     }
 }
 

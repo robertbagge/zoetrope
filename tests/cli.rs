@@ -616,6 +616,135 @@ fn test_max_size_accepts_raw_bytes() {
     assert!(size <= 2_000_000);
 }
 
+// ─── --for <PLATFORM> ───────────────────────────────────────────────────────
+
+#[test]
+fn test_for_slack_produces_gif_under_5mb_at_480px() {
+    assert_platform_produces_gif("slack", 5_000_000, 480);
+}
+
+#[test]
+fn test_for_email_produces_gif_under_500kb_at_320px() {
+    assert_platform_produces_gif("email", 500_000, 320);
+}
+
+#[test]
+fn test_for_github_under_10mb_and_960px() {
+    assert_platform_produces_gif("github", 10_000_000, 960);
+}
+
+#[test]
+fn test_for_discord_under_8mb_and_640px() {
+    assert_platform_produces_gif("discord", 8_000_000, 640);
+}
+
+#[test]
+fn test_for_twitter_under_5mb_and_480px() {
+    assert_platform_produces_gif("twitter", 5_000_000, 480);
+}
+
+fn assert_platform_produces_gif(platform: &str, max_bytes: u64, expected_width: u16) {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--for", platform])
+        .assert()
+        .success();
+
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(
+        size <= max_bytes,
+        "--for {platform} output should be ≤ {max_bytes} bytes, got {size}"
+    );
+
+    let (w, _, _) = decode_gif(&output);
+    assert_eq!(w, expected_width, "--for {platform} width");
+}
+
+#[test]
+fn test_for_with_webp_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "slack", "-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("produces GIF"));
+}
+
+#[test]
+fn test_for_with_webp_output_path_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("out.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "slack", "-o"])
+        .arg(&output)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("produces GIF"));
+}
+
+#[test]
+fn test_for_with_explicit_fps_uses_explicit_fps() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    // --for slack would default fps=10, but --fps 15 must win.
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "slack", "--fps", "15"])
+        .assert()
+        .success();
+
+    let (_, _, frames) = decode_gif(&output);
+    // 2s fixture @ 15fps ≈ 30 frames (with a tolerance for gifski de-duping).
+    assert!(
+        (25..=35).contains(&frames),
+        "expected ~30 frames (2s @ 15fps), got {frames}"
+    );
+}
+
+#[test]
+fn test_for_with_explicit_max_size_uses_user_target() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    // Slack defaults to 5MB; user's 1MB must override.
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "slack", "--max-size", "1mb"])
+        .assert()
+        .success();
+
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(
+        size <= 1_000_000,
+        "user --max-size should override slack preset, got {size}"
+    );
+}
+
+#[test]
+fn test_unknown_platform_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "myspace"])
+        .assert()
+        .failure();
+}
+
 // ─── Fixture helper sanity check ────────────────────────────────────────────
 
 #[test]
