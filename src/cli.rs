@@ -314,11 +314,7 @@ impl Args {
             platform_defaults.as_ref().map(|p| p.fps),
         ));
 
-        let explicit_max = self
-            .max_size
-            .as_deref()
-            .map(parse_size_arg)
-            .transpose()?;
+        let explicit_max = self.max_size.as_deref().map(parse_size_arg).transpose()?;
         let max_size = explicit_max.or_else(|| platform_defaults.as_ref().map(|p| p.max_size));
 
         // --for locks format to GIF, so `gifski_quality` is the right knob when
@@ -431,7 +427,9 @@ pub(crate) fn parse_size(s: &str) -> Result<u64, String> {
         return Err("missing number".into());
     }
 
-    let value: f64 = num_part.parse().map_err(|_| format!("not a number: {num_part}"))?;
+    let value: f64 = num_part
+        .parse()
+        .map_err(|_| format!("not a number: {num_part}"))?;
     if !value.is_finite() || value <= 0.0 {
         return Err("must be positive".into());
     }
@@ -447,7 +445,11 @@ fn split_size_suffix(s: &str) -> Result<(&str, u64), String> {
         "k" | "kb" => 1_000,
         "m" | "mb" => 1_000_000,
         "g" | "gb" => 1_000_000_000,
-        other => return Err(format!("unknown size suffix \"{other}\" (expected b, kb, mb, gb)")),
+        other => {
+            return Err(format!(
+                "unknown size suffix \"{other}\" (expected b, kb, mb, gb)"
+            ))
+        }
     };
     Ok((lower_end.trim(), multiplier))
 }

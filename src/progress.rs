@@ -93,5 +93,8 @@ pub(crate) fn probe_duration(input: &Path) -> Option<f64> {
         return None;
     }
     let s = String::from_utf8_lossy(&out.stdout);
-    s.trim().parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+    s.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v > 0.0)
 }

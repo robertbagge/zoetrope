@@ -187,9 +187,7 @@ fn run_ffmpeg_with_progress(
             .map_err(|_| "stderr drain thread panicked".to_string())
     })?;
 
-    let status = child
-        .wait()
-        .map_err(|e| format!("ffmpeg wait: {e}"))?;
+    let status = child.wait().map_err(|e| format!("ffmpeg wait: {e}"))?;
     if !status.success() {
         return Err(format!(
             "ffmpeg {stage} failed:\n{}",
