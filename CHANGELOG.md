@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/robertbagge/zoetrope/compare/v0.3.0...v0.4.0) (2026-04-24)
+
+
+### Features
+
+* --for platform presets (slack, github, discord, twitter, email) ([73cf749](https://github.com/robertbagge/zoetrope/commit/73cf74954f4a34dbdb1e66f3d3d173481791f015))
+* --max-size flag with iterative fit loop ([6f3ca59](https://github.com/robertbagge/zoetrope/commit/6f3ca59d12cd91108ec2fa46d89fe1a1f7a741cf))
+* chunk 1 — gifski pipeline, webp, trim, speed, playback ([52ef14c](https://github.com/robertbagge/zoetrope/commit/52ef14ca57710518db84207342c6c5365edfdafb))
+* chunk 1 — gifski pipeline, webp, trim, speed, playback ([1731a2d](https://github.com/robertbagge/zoetrope/commit/1731a2d8f17ae98a2cec25df95917c85c0a8814c))
+* progress bars via indicatif + README updates ([7f5f7a1](https://github.com/robertbagge/zoetrope/commit/7f5f7a14fedeab8f9ecc932833c93bf0c99a65d2))
+
 ## [0.3.0](https://github.com/robertbagge/zoetrope/compare/v0.2.1...v0.3.0) (2026-04-22)
 
 
