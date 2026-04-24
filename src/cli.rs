@@ -128,6 +128,10 @@ pub(crate) struct Args {
     #[arg(long, conflicts_with = "end")]
     pub duration: Option<String>,
 
+    /// Target max file size (e.g. 5mb, 500kb). Sizes use decimal units (1mb = 1,000,000 bytes).
+    #[arg(long)]
+    pub max_size: Option<String>,
+
     /// Overwrite output file without prompting
     #[arg(short, long)]
     pub force: bool,
@@ -146,6 +150,7 @@ pub(crate) struct Options {
     pub playback: Playback,
     pub start: Option<f64>,
     pub duration: Option<f64>,
+    pub max_size: Option<u64>,
 }
 
 impl Args {
@@ -220,6 +225,12 @@ impl Args {
         let fps = self.fps.unwrap_or(quality_settings.fps);
         let width = self.width.unwrap_or(quality_settings.width);
 
+        let max_size = self
+            .max_size
+            .as_deref()
+            .map(parse_size_arg)
+            .transpose()?;
+
         let output = self
             .output
             .unwrap_or_else(|| self.input.with_extension(format.extension()));
@@ -242,6 +253,7 @@ impl Args {
             playback: self.playback,
             start,
             duration: trim_duration,
+            max_size,
         })
     }
 }
@@ -283,9 +295,48 @@ fn parse_time_arg(s: &str) -> Result<f64, String> {
     parse_time(s).map_err(|e| format!("invalid time \"{s}\": {e}"))
 }
 
+/// Parse a human-readable size like `5mb`, `500kb`, `2GB`, or a raw byte count.
+/// Units are decimal (1 kb = 1,000 bytes, 1 mb = 1,000,000 bytes) to match how
+/// GitHub, Slack, and Discord document their upload limits.
+pub(crate) fn parse_size(s: &str) -> Result<u64, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("empty".into());
+    }
+
+    let (num_part, multiplier) = split_size_suffix(trimmed)?;
+    if num_part.is_empty() {
+        return Err("missing number".into());
+    }
+
+    let value: f64 = num_part.parse().map_err(|_| format!("not a number: {num_part}"))?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err("must be positive".into());
+    }
+
+    Ok((value * multiplier as f64).round() as u64)
+}
+
+fn split_size_suffix(s: &str) -> Result<(&str, u64), String> {
+    let lower_end = s.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let suffix = &s[lower_end.len()..];
+    let multiplier = match suffix.to_ascii_lowercase().as_str() {
+        "" | "b" => 1,
+        "k" | "kb" => 1_000,
+        "m" | "mb" => 1_000_000,
+        "g" | "gb" => 1_000_000_000,
+        other => return Err(format!("unknown size suffix \"{other}\" (expected b, kb, mb, gb)")),
+    };
+    Ok((lower_end.trim(), multiplier))
+}
+
+fn parse_size_arg(s: &str) -> Result<u64, String> {
+    parse_size(s).map_err(|e| format!("invalid size \"{s}\": {e}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_time;
+    use super::{parse_size, parse_time};
 
     #[test]
     fn parse_time_seconds_plain() {
@@ -312,5 +363,31 @@ mod tests {
         assert!(parse_time("abc").is_err());
         assert!(parse_time("").is_err());
         assert!(parse_time("1:2:3:4").is_err());
+    }
+
+    #[test]
+    fn parse_size_decimal_units() {
+        assert_eq!(parse_size("5mb").unwrap(), 5_000_000);
+        assert_eq!(parse_size("5MB").unwrap(), 5_000_000);
+        assert_eq!(parse_size("5m").unwrap(), 5_000_000);
+        assert_eq!(parse_size("500kb").unwrap(), 500_000);
+        assert_eq!(parse_size("500k").unwrap(), 500_000);
+        assert_eq!(parse_size("2gb").unwrap(), 2_000_000_000);
+        assert_eq!(parse_size("1.5mb").unwrap(), 1_500_000);
+    }
+
+    #[test]
+    fn parse_size_raw_bytes() {
+        assert_eq!(parse_size("5000000").unwrap(), 5_000_000);
+        assert_eq!(parse_size("1024b").unwrap(), 1024);
+    }
+
+    #[test]
+    fn parse_size_rejects_garbage() {
+        assert!(parse_size("").is_err());
+        assert!(parse_size("5xb").is_err());
+        assert!(parse_size("mb").is_err());
+        assert!(parse_size("0").is_err());
+        assert!(parse_size("-5mb").is_err());
     }
 }

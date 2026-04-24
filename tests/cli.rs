@@ -549,6 +549,73 @@ fn test_kitchen_sink_trim_speed_boomerang_width() {
     );
 }
 
+// ─── --max-size ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_max_size_respects_limit() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    // The 2s testsrc fixture at default medium settings is comfortably
+    // over 80 KB; asking for 80 KB forces the fit loop to shrink.
+    zoetrope()
+        .arg(&input)
+        .args(["--max-size", "80kb"])
+        .assert()
+        .success();
+
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(
+        size <= 80_000,
+        "output should be ≤ 80_000 bytes, got {size}"
+    );
+}
+
+#[test]
+fn test_max_size_impossible_target_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    // 1 KB is below any plausible GIF floor — fit loop exhausts and errors.
+    zoetrope()
+        .arg(&input)
+        .args(["--max-size", "1kb"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not reach"));
+}
+
+#[test]
+fn test_max_size_rejects_bad_unit() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--max-size", "5xb"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid size"));
+}
+
+#[test]
+fn test_max_size_accepts_raw_bytes() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    // 2_000_000 bytes = 2 MB. Default medium gif should fit without shrinking.
+    zoetrope()
+        .arg(&input)
+        .args(["--max-size", "2000000"])
+        .assert()
+        .success();
+
+    let size = std::fs::metadata(&output).unwrap().len();
+    assert!(size <= 2_000_000);
+}
+
 // ─── Fixture helper sanity check ────────────────────────────────────────────
 
 #[test]

@@ -26,7 +26,10 @@ pub(crate) fn run(opts: &Options) -> Result<(), String> {
     }
 
     let params = initial_params(opts);
-    encode(opts, &params)?;
+    match opts.max_size {
+        Some(target) => crate::fit::fit_to_size(opts, params, target)?,
+        None => encode(opts, &params)?,
+    }
     report_done(&opts.output);
     Ok(())
 }

@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 mod cli;
 mod encode;
+mod fit;
 mod pipeline;
 
 fn main() -> ExitCode {
