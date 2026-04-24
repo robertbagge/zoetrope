@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 gifski = { version = "1", default-features = false, features = ["png"] }
+indicatif = "0.17"
 tempfile = "3"
 
 [dev-dependencies]
