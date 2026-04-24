@@ -764,6 +764,165 @@ fn test_unknown_platform_errors() {
         .failure();
 }
 
+// ─── Batch conversion ──────────────────────────────────────────────────────
+
+#[test]
+fn test_batch_multiple_inputs() {
+    let dir = TempDir::new().unwrap();
+    let a = fixture(dir.path(), "a", "mov");
+    let b = fixture(dir.path(), "b", "mp4");
+
+    zoetrope().arg(&a).arg(&b).assert().success();
+
+    let out_a = dir.path().join("a.gif");
+    let out_b = dir.path().join("b.gif");
+    assert!(out_a.exists(), "batch output a.gif should exist");
+    assert!(out_b.exists(), "batch output b.gif should exist");
+    assert!(std::fs::metadata(&out_a).unwrap().len() > 0);
+    assert!(std::fs::metadata(&out_b).unwrap().len() > 0);
+}
+
+#[test]
+fn test_batch_output_dir() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = dir.path().join("gifs");
+    let a = fixture(dir.path(), "a", "mov");
+    let b = fixture(dir.path(), "b", "mov");
+
+    zoetrope()
+        .arg(&a)
+        .arg(&b)
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .assert()
+        .success();
+
+    assert!(
+        out_dir.join("a.gif").exists(),
+        "a.gif should land in --output-dir"
+    );
+    assert!(
+        out_dir.join("b.gif").exists(),
+        "b.gif should land in --output-dir"
+    );
+    assert!(
+        !dir.path().join("a.gif").exists(),
+        "a.gif should NOT land next to input when --output-dir is set"
+    );
+}
+
+#[test]
+fn test_batch_output_dir_creates_missing() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = dir.path().join("nested/newly/created");
+    let a = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&a)
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .assert()
+        .success();
+
+    assert!(out_dir.exists(), "missing output dir should be created");
+    assert!(out_dir.join("in.gif").exists());
+}
+
+#[test]
+fn test_batch_with_o_flag_errors() {
+    let dir = TempDir::new().unwrap();
+    let a = fixture(dir.path(), "a", "mov");
+    let b = fixture(dir.path(), "b", "mov");
+    let custom = dir.path().join("combined.gif");
+
+    zoetrope()
+        .arg(&a)
+        .arg(&b)
+        .args(["-o".as_ref(), custom.as_os_str()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--output-dir"));
+}
+
+#[test]
+fn test_batch_applies_flags_uniformly() {
+    let dir = TempDir::new().unwrap();
+    let a = fixture(dir.path(), "a", "mov");
+    let b = fixture(dir.path(), "b", "mov");
+
+    zoetrope()
+        .arg(&a)
+        .arg(&b)
+        .args(["--width", "400"])
+        .assert()
+        .success();
+
+    let (wa, _, _) = decode_gif(&dir.path().join("a.gif"));
+    let (wb, _, _) = decode_gif(&dir.path().join("b.gif"));
+    assert_eq!(wa, 400, "a.gif should honor --width");
+    assert_eq!(wb, 400, "b.gif should honor --width");
+}
+
+#[test]
+fn test_batch_preflight_aborts_on_missing_input() {
+    // If one of the inputs doesn't exist, the batch aborts during planning —
+    // no partial-encode side effects. Continue-on-error covers *runtime*
+    // encode failures (per-file), not bad configs.
+    let dir = TempDir::new().unwrap();
+    let a = fixture(dir.path(), "a", "mov");
+    let missing = dir.path().join("missing.mov");
+    let b = fixture(dir.path(), "b", "mov");
+
+    zoetrope()
+        .arg(&a)
+        .arg(&missing)
+        .arg(&b)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found"));
+
+    assert!(
+        !dir.path().join("a.gif").exists(),
+        "pre-flight failure should abort before any encode"
+    );
+    assert!(!dir.path().join("b.gif").exists());
+}
+
+#[test]
+fn test_single_input_with_output_dir() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = dir.path().join("out");
+    let a = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&a)
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .assert()
+        .success();
+
+    assert!(
+        out_dir.join("in.gif").exists(),
+        "single-input + --output-dir"
+    );
+    assert!(
+        !dir.path().join("in.gif").exists(),
+        "default path should not be used when --output-dir is given"
+    );
+}
+
+#[test]
+fn test_output_dir_and_output_conflict() {
+    let dir = TempDir::new().unwrap();
+    let a = mov_fixture(dir.path());
+    let out_dir = dir.path().join("out");
+    let custom = dir.path().join("custom.gif");
+
+    zoetrope()
+        .arg(&a)
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .args(["-o".as_ref(), custom.as_os_str()])
+        .assert()
+        .failure();
+}
+
 // ─── Fixture helper sanity check ────────────────────────────────────────────
 
 #[test]

@@ -18,7 +18,25 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let opts = cli::Args::parse().into_options()?;
+    let batch = cli::Args::parse().into_batch()?;
     pipeline::check_ffmpeg()?;
-    pipeline::run(&opts)
+    pipeline::preflight(&batch)?;
+
+    let n = batch.options.len();
+    let mut any_failed = false;
+    for (i, opts) in batch.options.iter().enumerate() {
+        if n > 1 {
+            eprintln!("[{}/{n}] {}", i + 1, opts.input.display());
+        }
+        if let Err(e) = pipeline::run(opts) {
+            eprintln!("error: {}: {e}", opts.input.display());
+            any_failed = true;
+        }
+    }
+
+    if any_failed {
+        Err("one or more files failed".into())
+    } else {
+        Ok(())
+    }
 }

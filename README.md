@@ -39,8 +39,24 @@ zoetrope demo.mov --playback boomerang      # forward then reverse
 zoetrope demo.mov -q high --fps 24          # preset + manual override
 zoetrope demo.mov --max-size 500kb          # shrink until it fits
 zoetrope demo.mov --for slack               # platform preset with auto-fit
+zoetrope *.mov --output-dir ./gifs/         # batch convert a folder
 zoetrope demo.mov --force                   # overwrite existing output
 ```
+
+## Batch
+
+Pass multiple inputs to convert them in one invocation. By default each output
+lands next to its input; `--output-dir <DIR>` collects them in one place
+(creating the directory if needed).
+
+```sh
+zoetrope a.mov b.mp4 c.webm                 # a.gif, b.gif, c.gif next to inputs
+zoetrope *.mov --output-dir ./gifs/         # all outputs in ./gifs/
+zoetrope *.mov --for slack --output-dir ./slack/   # mix batch with presets
+```
+
+All other flags (`--for`, `--width`, `--speed`, `-q`, etc.) apply uniformly to
+every file. `-o/--output` is single-input only — use `--output-dir` for batch.
 
 ## Smart Sizing
 
