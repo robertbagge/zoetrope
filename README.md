@@ -28,31 +28,53 @@ cargo install --path .
 
 ## Usage
 
+`zoetrope --help` prints the same categorised examples. A quick tour:
+
+### Basics
+
 ```sh
 zoetrope demo.mov                           # → demo.gif (medium quality)
-zoetrope demo.mp4 -q high                   # mp4/webm/mkv/avi also supported
+zoetrope demo.mp4                           # mp4/webm/mkv/avi also supported
+zoetrope demo.mov -o clip.gif               # custom output filename
 zoetrope demo.mov -F webp                   # → demo.webp (2-5x smaller)
-zoetrope demo.mov --start 5s --end 12s      # trim to a 7-second clip
-zoetrope demo.mov --start 1:30 --duration 10s
-zoetrope demo.mov --speed 2                 # 2x speedup
-zoetrope demo.mov --playback boomerang      # forward then reverse
-zoetrope demo.mov -q high --fps 24          # preset + manual override
-zoetrope demo.mov --max-size 500kb          # shrink until it fits
-zoetrope demo.mov --for slack               # platform preset with auto-fit
-zoetrope *.mov --output-dir ./gifs/         # batch convert a folder
 zoetrope demo.mov --force                   # overwrite existing output
 ```
 
-## Batch
+### Quality and size
+
+```sh
+zoetrope demo.mov -q high                   # 1440px, 15fps preset
+zoetrope demo.mov --width 640               # override width only
+zoetrope demo.mov --fps 20                  # override frame rate only
+zoetrope demo.mov -q high --fps 24          # preset + manual override
+zoetrope demo.mov --max-size 500kb          # shrink iteratively to fit
+zoetrope demo.mov --for slack               # platform preset with auto-fit
+zoetrope demo.mov --for slack --fps 15      # preset + manual override
+```
+
+### Trim, speed, playback
+
+```sh
+zoetrope demo.mov --start 5s --end 12s      # 7-second clip
+zoetrope demo.mov --start 1:30 --duration 10s
+zoetrope demo.mov --end 10s                 # first 10 seconds
+zoetrope demo.mov --speed 2                 # 2x speedup
+zoetrope demo.mov --speed 0.5               # slow motion
+zoetrope demo.mov --playback reverse
+zoetrope demo.mov --playback boomerang      # forward then reverse
+```
+
+### Batch
 
 Pass multiple inputs to convert them in one invocation. By default each output
 lands next to its input; `--output-dir <DIR>` collects them in one place
 (creating the directory if needed).
 
 ```sh
-zoetrope a.mov b.mp4 c.webm                 # a.gif, b.gif, c.gif next to inputs
-zoetrope *.mov --output-dir ./gifs/         # all outputs in ./gifs/
-zoetrope *.mov --for slack --output-dir ./slack/   # mix batch with presets
+zoetrope *.mov                              # each → .gif next to input
+zoetrope a.mov b.mp4 c.webm                 # mixed formats
+zoetrope *.mov --output-dir ./gifs/         # collect outputs in one dir
+zoetrope *.mov --for slack --output-dir ./slack/
 ```
 
 All other flags (`--for`, `--width`, `--speed`, `-q`, etc.) apply uniformly to

@@ -4,6 +4,38 @@ use std::path::PathBuf;
 
 pub(crate) const SUPPORTED_INPUT_FORMATS: &[&str] = &["mov", "mp4", "webm", "mkv", "avi"];
 
+const EXAMPLES: &str = "\
+Examples:
+  # Basics
+  zoetrope demo.mov                            # → demo.gif (medium quality)
+  zoetrope demo.mov -o clip.gif                # custom output filename
+  zoetrope demo.mov -F webp                    # → demo.webp (2-5x smaller)
+  zoetrope demo.mov --force                    # overwrite existing output
+
+  # Quality and size
+  zoetrope demo.mov -q high                    # 1440px, 15fps preset
+  zoetrope demo.mov --width 640                # override width only
+  zoetrope demo.mov --fps 20                   # override frame rate only
+  zoetrope demo.mov --max-size 500kb           # shrink iteratively to fit
+  zoetrope demo.mov --for slack                # platform preset with auto-fit
+  zoetrope demo.mov --for slack --fps 15       # preset + manual override
+
+  # Trim, speed, playback
+  zoetrope demo.mov --start 5s --end 12s       # 7-second clip
+  zoetrope demo.mov --start 1:30 --duration 10s
+  zoetrope demo.mov --end 10s                  # first 10 seconds
+  zoetrope demo.mov --speed 2                  # 2x speedup
+  zoetrope demo.mov --speed 0.5                # slow motion
+  zoetrope demo.mov --playback reverse
+  zoetrope demo.mov --playback boomerang       # forward then reverse
+
+  # Batch
+  zoetrope *.mov                               # each → .gif next to input
+  zoetrope a.mov b.mp4 c.webm                  # mixed formats
+  zoetrope *.mov --output-dir ./gifs/          # collect outputs in one dir
+  zoetrope *.mov --for slack --output-dir ./slack/
+";
+
 pub(crate) struct QualitySettings {
     pub width: u32,
     pub fps: u32,
@@ -143,6 +175,7 @@ impl Platform {
 #[command(name = "zoetrope")]
 #[command(version)]
 #[command(about = "Convert screen recordings to high-quality GIFs or WebP")]
+#[command(after_help = EXAMPLES)]
 pub(crate) struct Args {
     /// Input video file(s) (mov, mp4, webm, mkv, avi). Pass multiple for batch mode.
     #[arg(required = true, num_args = 1..)]
