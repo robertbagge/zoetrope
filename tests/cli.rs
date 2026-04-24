@@ -887,6 +887,85 @@ fn test_batch_preflight_aborts_on_missing_input() {
 }
 
 #[test]
+fn test_batch_continues_on_runtime_failure() {
+    // Headline batch guarantee: one bad file at encode time doesn't abort
+    // the rest. A `.mov` stuffed with random bytes passes pre-flight (exists,
+    // valid extension) but ffmpeg fails to decode it at encode time. The
+    // surrounding good fixtures should still produce outputs; process exit
+    // is non-zero; stderr names the bad file.
+    let dir = TempDir::new().unwrap();
+    let good1 = fixture(dir.path(), "good1", "mov");
+    let good2 = fixture(dir.path(), "good2", "mov");
+    let corrupt = dir.path().join("corrupt.mov");
+    std::fs::write(&corrupt, b"not actually a mov file, just garbage bytes").unwrap();
+
+    zoetrope()
+        .arg(&good1)
+        .arg(&corrupt)
+        .arg(&good2)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("corrupt.mov"));
+
+    assert!(
+        dir.path().join("good1.gif").exists(),
+        "good1.gif should be produced before the mid-batch failure"
+    );
+    assert!(
+        dir.path().join("good2.gif").exists(),
+        "good2.gif should be produced AFTER the mid-batch failure — that's the guarantee"
+    );
+    assert!(
+        !dir.path().join("corrupt.gif").exists(),
+        "failed encode should not leave an output file"
+    );
+}
+
+#[test]
+fn test_batch_rejects_colliding_outputs() {
+    // Two inputs with the same stem in different subdirs would both target
+    // OUT/foo.gif when piped through --output-dir. Without collision
+    // detection the second encode silently overwrites the first.
+    let dir = TempDir::new().unwrap();
+    let sub_a = dir.path().join("a");
+    let sub_b = dir.path().join("b");
+    std::fs::create_dir_all(&sub_a).unwrap();
+    std::fs::create_dir_all(&sub_b).unwrap();
+    let input_a = fixture(&sub_a, "demo", "mov");
+    let input_b = fixture(&sub_b, "demo", "mov");
+    let out_dir = dir.path().join("out");
+
+    zoetrope()
+        .arg(&input_a)
+        .arg(&input_b)
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "two inputs map to the same output",
+        ));
+
+    // Neither output should exist — pre-flight aborts before any encode.
+    assert!(!out_dir.join("demo.gif").exists());
+}
+
+#[test]
+fn test_batch_rejects_duplicate_input() {
+    // Passing the same file twice collapses onto a single output path.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .arg(&input)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "two inputs map to the same output",
+        ));
+}
+
+#[test]
 fn test_single_input_with_output_dir() {
     let dir = TempDir::new().unwrap();
     let out_dir = dir.path().join("out");

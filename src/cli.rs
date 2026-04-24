@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub(crate) const SUPPORTED_INPUT_FORMATS: &[&str] = &["mov", "mp4", "webm", "mkv", "avi"];
@@ -342,6 +343,11 @@ impl Args {
         }
 
         let mut options = Vec::with_capacity(n);
+        // Tracks which input first claimed each output path, so we can reject
+        // batches where two inputs resolve to the same output (e.g. same stem
+        // across directories into --output-dir, or the same file passed twice).
+        // Left undetected, the second encode would silently overwrite the first.
+        let mut claimed: HashMap<PathBuf, PathBuf> = HashMap::new();
         for input in &self.inputs {
             if !input.exists() {
                 return Err(format!("file not found: {}", input.display()));
@@ -369,6 +375,16 @@ impl Args {
                 &format,
             );
 
+            if let Some(prior) = claimed.get(&output) {
+                return Err(format!(
+                    "two inputs map to the same output {}: {} and {}. \
+                     Drop the duplicate, or rename one.",
+                    output.display(),
+                    prior.display(),
+                    input.display(),
+                ));
+            }
+
             if output.exists() && !self.force {
                 return Err(format!(
                     "output file already exists: {} (use --force to overwrite)",
@@ -376,6 +392,7 @@ impl Args {
                 ));
             }
 
+            claimed.insert(output.clone(), input.clone());
             options.push(Options {
                 input: input.clone(),
                 output,
