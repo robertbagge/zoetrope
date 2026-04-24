@@ -9,15 +9,16 @@ const MIN_GIFSKI_QUALITY: u8 = 40;
 const MIN_WEBP_QUALITY: u8 = 30;
 
 /// Encode, measure, shrink, retry — until the output fits under `target`
-/// or all knobs hit their floor. The output file is overwritten on each
-/// attempt, so the last attempt's bytes are what the user sees.
+/// or all knobs hit their floor. Knobs are monotonically non-increasing,
+/// so the final attempt is always the smallest the loop can produce.
 pub(crate) fn fit_to_size(
     opts: &Options,
     start: EncodeParams,
     target: u64,
+    probe_seconds: Option<f64>,
 ) -> Result<(), String> {
     let mut params = start;
-    let mut smallest: Option<(u64, EncodeParams)> = None;
+    let mut last_size: u64 = 0;
 
     for attempt in 1..=MAX_ATTEMPTS {
         if attempt > 1 {
@@ -27,42 +28,28 @@ pub(crate) fn fit_to_size(
             );
         }
 
-        pipeline::encode(opts, &params)?;
-        let size = std::fs::metadata(&opts.output)
+        pipeline::encode(opts, &params, probe_seconds)?;
+        last_size = std::fs::metadata(&opts.output)
             .map_err(|e| format!("stat output: {e}"))?
             .len();
 
-        if size <= target {
+        if last_size <= target {
             return Ok(());
         }
 
-        let floor_hit = smallest
-            .as_ref()
-            .map(|(s, _)| size >= *s)
-            .unwrap_or(false);
-        if smallest.as_ref().map(|(s, _)| size < *s).unwrap_or(true) {
-            smallest = Some((size, params.clone()));
-        }
-
-        match shrink_step(&opts.format, &params, size, target) {
+        match shrink_step(&opts.format, &params, last_size, target) {
             Some(next) => params = next,
             None => break,
         }
-
-        // If shrink couldn't actually reduce anything (shouldn't happen, but guard).
-        if floor_hit && attempt == MAX_ATTEMPTS {
-            break;
-        }
     }
 
-    let (bytes, p) = smallest.expect("fit loop ran at least once");
     Err(format!(
         "could not reach {} after {MAX_ATTEMPTS} attempts (smallest: {} at {}px/{}fps/q{})",
         format_size(target),
-        format_size(bytes),
-        p.width,
-        p.fps,
-        p.quality,
+        format_size(last_size),
+        params.width,
+        params.fps,
+        params.quality,
     ))
 }
 
@@ -117,14 +104,16 @@ fn shrink_step(
     Some(next)
 }
 
+/// Caller guarantees `current > MIN_WIDTH`.
 fn shrink_width(current: u32, ratio: f64) -> u32 {
     let scaled = (current as f64 * ratio) as u32;
-    scaled.max(MIN_WIDTH).min(current.saturating_sub(1)).max(MIN_WIDTH)
+    scaled.clamp(MIN_WIDTH, current - 1)
 }
 
+/// Caller guarantees `current > MIN_FPS`. Step down ~25% per shrink.
 fn shrink_fps(current: u32) -> u32 {
-    // Step down ~25% per shrink, floor at MIN_FPS.
-    ((current as f64 * 0.75) as u32).max(MIN_FPS).min(current.saturating_sub(1)).max(MIN_FPS)
+    let scaled = (current as f64 * 0.75) as u32;
+    scaled.clamp(MIN_FPS, current - 1)
 }
 
 fn shrink_quality(current: u8, floor: u8) -> u8 {

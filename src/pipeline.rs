@@ -3,6 +3,7 @@ use std::process::Command;
 
 use crate::cli::{Format, Options};
 use crate::encode::{encode_gif, encode_webp, EncodeParams};
+use crate::progress::probe_duration;
 
 pub(crate) fn check_ffmpeg() -> Result<(), String> {
     match Command::new("ffmpeg").arg("-version").output() {
@@ -25,19 +26,26 @@ pub(crate) fn run(opts: &Options) -> Result<(), String> {
         );
     }
 
+    // Probe once and cache — the fit loop may call encode up to 5 times,
+    // but the input duration doesn't change between attempts.
+    let probe_seconds = probe_duration(&opts.input);
     let params = initial_params(opts);
     match opts.max_size {
-        Some(target) => crate::fit::fit_to_size(opts, params, target)?,
-        None => encode(opts, &params)?,
+        Some(target) => crate::fit::fit_to_size(opts, params, target, probe_seconds)?,
+        None => encode(opts, &params, probe_seconds)?,
     }
     report_done(&opts.output);
     Ok(())
 }
 
-pub(crate) fn encode(opts: &Options, params: &EncodeParams) -> Result<(), String> {
+pub(crate) fn encode(
+    opts: &Options,
+    params: &EncodeParams,
+    probe_seconds: Option<f64>,
+) -> Result<(), String> {
     match opts.format {
-        Format::Gif => encode_gif(opts, params),
-        Format::Webp => encode_webp(opts, params),
+        Format::Gif => encode_gif(opts, params, probe_seconds),
+        Format::Webp => encode_webp(opts, params, probe_seconds),
     }
 }
 

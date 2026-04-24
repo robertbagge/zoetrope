@@ -298,29 +298,21 @@ impl Args {
 
         let platform_defaults = self.for_.as_ref().map(|p| p.settings());
 
-        // Width/fps: explicit flag > quality preset (if user set -q) > platform > quality-medium.
-        let quality_preset = self.quality.clone().unwrap_or(Quality::Medium);
-        let q_set = self.quality.is_some();
+        // Precedence (low → high): quality-medium default, platform, user -q, explicit flag.
+        let user_set_quality = self.quality.is_some();
+        let quality_preset = self.quality.unwrap_or(Quality::Medium);
         let quality_settings = quality_preset.settings();
 
-        let preset_width = if q_set {
-            quality_settings.width
-        } else {
-            platform_defaults
-                .as_ref()
-                .map(|p| p.width)
-                .unwrap_or(quality_settings.width)
-        };
-        let preset_fps = if q_set {
-            quality_settings.fps
-        } else {
-            platform_defaults
-                .as_ref()
-                .map(|p| p.fps)
-                .unwrap_or(quality_settings.fps)
-        };
-        let width = self.width.unwrap_or(preset_width);
-        let fps = self.fps.unwrap_or(preset_fps);
+        let width = self.width.unwrap_or(preset_pick(
+            user_set_quality,
+            quality_settings.width,
+            platform_defaults.as_ref().map(|p| p.width),
+        ));
+        let fps = self.fps.unwrap_or(preset_pick(
+            user_set_quality,
+            quality_settings.fps,
+            platform_defaults.as_ref().map(|p| p.fps),
+        ));
 
         let explicit_max = self
             .max_size
@@ -329,21 +321,17 @@ impl Args {
             .transpose()?;
         let max_size = explicit_max.or_else(|| platform_defaults.as_ref().map(|p| p.max_size));
 
-        // Encoder quality: explicit -q wins; else platform's (GIF only, since
-        // --for locks to GIF); else quality preset's default for the format.
-        let encoder_quality = if q_set {
-            match format {
-                Format::Gif => quality_settings.gifski_quality,
-                Format::Webp => quality_settings.webp_quality,
-            }
-        } else if let Some(p) = &platform_defaults {
-            p.gifski_quality
-        } else {
-            match format {
-                Format::Gif => quality_settings.gifski_quality,
-                Format::Webp => quality_settings.webp_quality,
-            }
+        // --for locks format to GIF, so `gifski_quality` is the right knob when
+        // the platform default wins.
+        let format_quality = match format {
+            Format::Gif => quality_settings.gifski_quality,
+            Format::Webp => quality_settings.webp_quality,
         };
+        let encoder_quality = preset_pick(
+            user_set_quality,
+            format_quality,
+            platform_defaults.as_ref().map(|p| p.gifski_quality),
+        );
 
         let output = self
             .output
@@ -369,6 +357,16 @@ impl Args {
             duration: trim_duration,
             max_size,
         })
+    }
+}
+
+/// Pick a preset value under the `quality preset (if user set -q) else platform
+/// else quality default` precedence rule shared by width, fps, and encoder quality.
+fn preset_pick<T: Copy>(user_set_quality: bool, from_quality: T, platform: Option<T>) -> T {
+    if user_set_quality {
+        from_quality
+    } else {
+        platform.unwrap_or(from_quality)
     }
 }
 

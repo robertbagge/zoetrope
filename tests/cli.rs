@@ -714,6 +714,25 @@ fn test_for_with_explicit_fps_uses_explicit_fps() {
 }
 
 #[test]
+fn test_for_with_explicit_quality_uses_quality_preset() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.gif");
+
+    // --for slack defaults to 480px; -q ultra must win and produce 2048px.
+    // Disable the slack size cap (raise to something unreachable) so the
+    // fit loop doesn't shrink us away from ultra's 2048px.
+    zoetrope()
+        .arg(&input)
+        .args(["--for", "slack", "-q", "ultra", "--max-size", "1gb"])
+        .assert()
+        .success();
+
+    let (w, _, _) = decode_gif(&output);
+    assert_eq!(w, 2048, "-q ultra should override --for slack's 480px");
+}
+
+#[test]
 fn test_for_with_explicit_max_size_uses_user_target() {
     let dir = TempDir::new().unwrap();
     let input = mov_fixture(dir.path());

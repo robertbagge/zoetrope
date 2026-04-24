@@ -1,8 +1,17 @@
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+
+fn determinate_style() -> ProgressStyle {
+    ProgressStyle::with_template("{prefix:>12.cyan.bold} [{bar:30}] {percent:>3}% ({eta})")
+        .unwrap()
+        .progress_chars("=> ")
+}
+
+fn spinner_style() -> ProgressStyle {
+    ProgressStyle::with_template("{prefix:>12.cyan.bold} {spinner} {msg}").unwrap()
+}
 
 /// Build a progress bar for an ffmpeg phase. If `total_us` is `Some`, use a
 /// determinate bar keyed on microseconds of encoded output; otherwise use a
@@ -12,20 +21,12 @@ pub(crate) fn ffmpeg_bar(total_us: Option<u64>, label: &str) -> ProgressBar {
     let bar = match total_us {
         Some(total) => {
             let bar = ProgressBar::with_draw_target(Some(total), target);
-            bar.set_style(
-                ProgressStyle::with_template(
-                    "{prefix:>12.cyan.bold} [{bar:30}] {percent:>3}% ({eta})",
-                )
-                .unwrap()
-                .progress_chars("=> "),
-            );
+            bar.set_style(determinate_style());
             bar
         }
         None => {
             let bar = ProgressBar::with_draw_target(None, target);
-            bar.set_style(
-                ProgressStyle::with_template("{prefix:>12.cyan.bold} {spinner} {msg}").unwrap(),
-            );
+            bar.set_style(spinner_style());
             bar.enable_steady_tick(std::time::Duration::from_millis(120));
             bar
         }
@@ -35,41 +36,34 @@ pub(crate) fn ffmpeg_bar(total_us: Option<u64>, label: &str) -> ProgressBar {
 }
 
 /// `gifski::progress::ProgressReporter` implementation that ticks an
-/// indicatif bar. gifski tells us a total via `init(total)` and then calls
-/// `increase()` once per completed frame; `done()` clears the bar.
+/// indicatif bar. gifski's trait has no init hook, so the total frame count
+/// must come from the caller at construction time.
 pub(crate) struct GifskiBar {
     bar: ProgressBar,
-    // gifski's init may be called multiple times; track frames seen.
-    seen: AtomicUsize,
+    seen: u64,
 }
 
 impl GifskiBar {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(total_frames: u64) -> Self {
         let target = ProgressDrawTarget::stderr();
-        let bar = ProgressBar::with_draw_target(None, target);
-        bar.set_style(
-            ProgressStyle::with_template(
-                "{prefix:>12.cyan.bold} [{bar:30}] {percent:>3}% ({eta})",
-            )
-            .unwrap()
-            .progress_chars("=> "),
-        );
+        let bar = ProgressBar::with_draw_target(Some(total_frames), target);
+        bar.set_style(determinate_style());
         bar.set_prefix("encoding gif");
-        Self {
-            bar,
-            seen: AtomicUsize::new(0),
-        }
+        Self { bar, seen: 0 }
     }
 
-    pub(crate) fn inner(&self) -> &ProgressBar {
-        &self.bar
+    /// Clear the bar. Idempotent — safe to call after gifski's own `done()`
+    /// handler (which also clears), as a belt-and-braces in the error path
+    /// where gifski may not have invoked `done()`.
+    pub(crate) fn finish(&self) {
+        self.bar.finish_and_clear();
     }
 }
 
 impl gifski::progress::ProgressReporter for GifskiBar {
     fn increase(&mut self) -> bool {
-        let n = self.seen.fetch_add(1, Ordering::Relaxed) as u64 + 1;
-        self.bar.set_position(n);
+        self.seen += 1;
+        self.bar.set_position(self.seen);
         true
     }
 

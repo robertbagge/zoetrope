@@ -6,7 +6,7 @@ use std::thread;
 use tempfile::TempDir;
 
 use crate::cli::{Options, Playback};
-use crate::progress::{ffmpeg_bar, probe_duration, GifskiBar};
+use crate::progress::{ffmpeg_bar, GifskiBar};
 
 /// Tunable parameters the fit loop can vary between attempts.
 /// Kept separate from `Options` so the loop can retry with different values
@@ -19,11 +19,15 @@ pub(crate) struct EncodeParams {
     pub quality: u8,
 }
 
-pub(crate) fn encode_gif(opts: &Options, params: &EncodeParams) -> Result<(), String> {
+pub(crate) fn encode_gif(
+    opts: &Options,
+    params: &EncodeParams,
+    probe_seconds: Option<f64>,
+) -> Result<(), String> {
     let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
     let png_pattern = tmp.path().join("frame_%06d.png");
 
-    let total_us = effective_duration_us(opts);
+    let total_us = effective_duration_us(opts, probe_seconds);
     let bar = ffmpeg_bar(total_us, "extracting");
 
     extract_png_frames(opts, params, &png_pattern, &bar)?;
@@ -43,8 +47,12 @@ pub(crate) fn encode_gif(opts: &Options, params: &EncodeParams) -> Result<(), St
     encode_gif_with_gifski(pngs, &opts.output, params.width, params.fps, params.quality)
 }
 
-pub(crate) fn encode_webp(opts: &Options, params: &EncodeParams) -> Result<(), String> {
-    let total_us = effective_duration_us(opts);
+pub(crate) fn encode_webp(
+    opts: &Options,
+    params: &EncodeParams,
+    probe_seconds: Option<f64>,
+) -> Result<(), String> {
+    let total_us = effective_duration_us(opts, probe_seconds);
     let bar = ffmpeg_bar(total_us, "encoding");
 
     let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
@@ -63,10 +71,9 @@ pub(crate) fn encode_webp(opts: &Options, params: &EncodeParams) -> Result<(), S
 ///   - trim shortens it (min(clip_duration, duration))
 ///   - --speed 2 halves it
 ///   - boomerang doubles it
-fn effective_duration_us(opts: &Options) -> Option<u64> {
-    let probe = probe_duration(&opts.input);
+fn effective_duration_us(opts: &Options, probe_seconds: Option<f64>) -> Option<u64> {
     let start = opts.start.unwrap_or(0.0);
-    let after_start = probe.map(|d| (d - start).max(0.0));
+    let after_start = probe_seconds.map(|d| (d - start).max(0.0));
     let clip = match (after_start, opts.duration) {
         (Some(a), Some(d)) => Some(a.min(d)),
         (Some(a), None) => Some(a),
@@ -139,13 +146,16 @@ fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Pla
 }
 
 /// Run ffmpeg with `-progress pipe:1 -nostats`, streaming `out_time_us=N`
-/// key-value lines and ticking the progress bar. Returns the usual
-/// success/stderr-on-failure contract.
+/// key-value lines and ticking the progress bar. Stderr is drained on a
+/// scoped thread so a verbose encoder can't deadlock by filling its stderr
+/// pipe while we block on stdout.
 fn run_ffmpeg_with_progress(
     mut cmd: Command,
     stage: &str,
     bar: &indicatif::ProgressBar,
 ) -> Result<(), String> {
+    use std::io::Read;
+
     cmd.args(["-progress", "pipe:1", "-nostats"]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -154,22 +164,36 @@ fn run_ffmpeg_with_progress(
         .map_err(|e| format!("failed to run ffmpeg: {e}"))?;
 
     let stdout = child.stdout.take().ok_or("ffmpeg stdout missing")?;
-    let reader = BufReader::new(stdout);
-    for line in reader.lines().map_while(Result::ok) {
-        if let Some(rest) = line.strip_prefix("out_time_us=") {
-            if let Ok(us) = rest.trim().parse::<u64>() {
-                bar.set_position(us);
+    let mut stderr = child.stderr.take().ok_or("ffmpeg stderr missing")?;
+
+    let stderr_buf = thread::scope(|s| -> Result<Vec<u8>, String> {
+        let stderr_handle = s.spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf);
+            buf
+        });
+
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(rest) = line.strip_prefix("out_time_us=") {
+                if let Ok(us) = rest.trim().parse::<u64>() {
+                    bar.set_position(us);
+                }
             }
         }
-    }
 
-    let output = child
-        .wait_with_output()
+        stderr_handle
+            .join()
+            .map_err(|_| "stderr drain thread panicked".to_string())
+    })?;
+
+    let status = child
+        .wait()
         .map_err(|e| format!("ffmpeg wait: {e}"))?;
-    if !output.status.success() {
+    if !status.success() {
         return Err(format!(
             "ffmpeg {stage} failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&stderr_buf)
         ));
     }
     Ok(())
@@ -198,6 +222,7 @@ fn encode_gif_with_gifski(
         .map_err(|e| format!("create output {}: {}", output.display(), e))?;
 
     let fps_f = fps as f64;
+    let total_frames = pngs.len() as u64;
 
     thread::scope(|s| -> Result<(), String> {
         let collector_handle = s.spawn(move || -> Result<(), String> {
@@ -210,11 +235,11 @@ fn encode_gif_with_gifski(
             Ok(())
         });
 
-        let mut reporter = GifskiBar::new();
+        let mut reporter = GifskiBar::new(total_frames);
         let write_result = writer
             .write(file, &mut reporter)
             .map_err(|e| format!("write gif: {e}"));
-        reporter.inner().finish_and_clear();
+        reporter.finish();
 
         let collect_result = collector_handle
             .join()
