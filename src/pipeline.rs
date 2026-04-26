@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::cli::{Format, Options};
+use crate::cli::{BatchPlan, Format, Options};
 use crate::encode::{encode_gif, encode_webp, EncodeParams};
 use crate::progress::probe_duration;
 
@@ -17,15 +17,22 @@ pub(crate) fn check_ffmpeg() -> Result<(), String> {
     }
 }
 
-pub(crate) fn run(opts: &Options) -> Result<(), String> {
-    if opts.format == Format::Webp && !ffmpeg_has_encoder("libwebp") {
+/// Run once before the batch loop. Catches environment problems that would
+/// otherwise fail per-file (e.g. ffmpeg built without libwebp when a WebP
+/// output is requested), so the user sees one clean error instead of N.
+pub(crate) fn preflight(batch: &BatchPlan) -> Result<(), String> {
+    let needs_webp = batch.options.iter().any(|o| o.format == Format::Webp);
+    if needs_webp && !ffmpeg_has_encoder("libwebp") {
         return Err(
             "ffmpeg was built without libwebp — install one that includes it \
              (e.g. `brew install ffmpeg-full` on macOS, standard `ffmpeg` on Ubuntu)"
                 .into(),
         );
     }
+    Ok(())
+}
 
+pub(crate) fn run(opts: &Options) -> Result<(), String> {
     // Probe once and cache — the fit loop may call encode up to 5 times,
     // but the input duration doesn't change between attempts.
     let probe_seconds = probe_duration(&opts.input);

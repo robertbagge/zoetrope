@@ -2,7 +2,7 @@
 name = "zoetrope"
 version = "0.4.0"
 edition = "2021"
-description = "Convert .mov files to high-quality gifs using ffmpeg"
+description = "Convert screen recordings to GIF or animated WebP"
 publish = false
 
 [dependencies]

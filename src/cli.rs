@@ -1,7 +1,40 @@
 use clap::{Parser, ValueEnum};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub(crate) const SUPPORTED_INPUT_FORMATS: &[&str] = &["mov", "mp4", "webm", "mkv", "avi"];
+
+const EXAMPLES: &str = "\
+Examples:
+  # Basics
+  zoetrope demo.mov                            # → demo.gif (medium quality)
+  zoetrope demo.mov -o clip.gif                # custom output filename
+  zoetrope demo.mov -F webp                    # → demo.webp (2-5x smaller)
+  zoetrope demo.mov --force                    # overwrite existing output
+
+  # Quality and size
+  zoetrope demo.mov -q high                    # 1440px, 15fps preset
+  zoetrope demo.mov --width 640                # override width only
+  zoetrope demo.mov --fps 20                   # override frame rate only
+  zoetrope demo.mov --max-size 500kb           # shrink iteratively to fit
+  zoetrope demo.mov --for slack                # platform preset with auto-fit
+  zoetrope demo.mov --for slack --fps 15       # preset + manual override
+
+  # Trim, speed, playback
+  zoetrope demo.mov --start 5s --end 12s       # 7-second clip
+  zoetrope demo.mov --start 1:30 --duration 10s
+  zoetrope demo.mov --end 10s                  # first 10 seconds
+  zoetrope demo.mov --speed 2                  # 2x speedup
+  zoetrope demo.mov --speed 0.5                # slow motion
+  zoetrope demo.mov --playback reverse
+  zoetrope demo.mov --playback boomerang       # forward then reverse
+
+  # Batch
+  zoetrope *.mov                               # each → .gif next to input
+  zoetrope a.mov b.mp4 c.webm                  # mixed formats
+  zoetrope *.mov --output-dir ./gifs/          # collect outputs in one dir
+  zoetrope *.mov --for slack --output-dir ./slack/
+";
 
 pub(crate) struct QualitySettings {
     pub width: u32,
@@ -142,13 +175,19 @@ impl Platform {
 #[command(name = "zoetrope")]
 #[command(version)]
 #[command(about = "Convert screen recordings to high-quality GIFs or WebP")]
+#[command(after_help = EXAMPLES)]
 pub(crate) struct Args {
-    /// Input video file (mov, mp4, webm, mkv, avi)
-    pub input: PathBuf,
+    /// Input video file(s) (mov, mp4, webm, mkv, avi). Pass multiple for batch mode.
+    #[arg(required = true, num_args = 1..)]
+    pub inputs: Vec<PathBuf>,
 
-    /// Output file path (defaults to input with the chosen format's extension)
-    #[arg(short, long)]
+    /// Output file path (single-input mode only; incompatible with --output-dir)
+    #[arg(short, long, conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
+
+    /// Output directory for batch mode (created if missing)
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
 
     /// Output format (defaults to gif, or inferred from --output extension)
     #[arg(short = 'F', long)]
@@ -219,24 +258,18 @@ pub(crate) struct Options {
     pub max_size: Option<u64>,
 }
 
-impl Args {
-    pub(crate) fn into_options(self) -> Result<Options, String> {
-        if !self.input.exists() {
-            return Err(format!("file not found: {}", self.input.display()));
-        }
+pub(crate) struct BatchPlan {
+    pub options: Vec<Options>,
+}
 
-        let ext = self
-            .input
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_ascii_lowercase());
-        if !ext
-            .as_deref()
-            .is_some_and(|e| SUPPORTED_INPUT_FORMATS.contains(&e))
-        {
+impl Args {
+    pub(crate) fn into_batch(self) -> Result<BatchPlan, String> {
+        let n = self.inputs.len();
+
+        if self.output.is_some() && n > 1 {
             return Err(format!(
-                "input must be one of: {}",
-                SUPPORTED_INPUT_FORMATS.join(", ")
+                "-o/--output expects a single output path; got {n} inputs. \
+                 Pass --output-dir for batch mode, or drop -o to write next to each input."
             ));
         }
 
@@ -248,10 +281,10 @@ impl Args {
 
         let start = self.start.as_deref().map(parse_time_arg).transpose()?;
         let end = self.end.as_deref().map(parse_time_arg).transpose()?;
-        let duration = self.duration.as_deref().map(parse_time_arg).transpose()?;
+        let duration_flag = self.duration.as_deref().map(parse_time_arg).transpose()?;
 
         // clap's `conflicts_with` on --end/--duration guarantees we never see both.
-        let trim_duration = match (start, end, duration) {
+        let trim_duration = match (start, end, duration_flag) {
             (s, Some(e), None) => {
                 let start_val = s.unwrap_or(0.0);
                 if e <= start_val {
@@ -329,30 +362,105 @@ impl Args {
             platform_defaults.as_ref().map(|p| p.gifski_quality),
         );
 
-        let output = self
-            .output
-            .unwrap_or_else(|| self.input.with_extension(format.extension()));
-
-        if output.exists() && !self.force {
-            return Err(format!(
-                "output file already exists: {} (use --force to overwrite)",
-                output.display()
-            ));
+        if let Some(dir) = self.output_dir.as_ref() {
+            if dir.exists() && !dir.is_dir() {
+                return Err(format!(
+                    "--output-dir exists but is not a directory: {}",
+                    dir.display()
+                ));
+            }
+            if !dir.exists() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("create --output-dir {}: {e}", dir.display()))?;
+            }
         }
 
-        Ok(Options {
-            input: self.input,
-            output,
-            format,
-            encoder_quality,
-            fps,
-            width,
-            speed: self.speed,
-            playback: self.playback,
-            start,
-            duration: trim_duration,
-            max_size,
-        })
+        let mut options = Vec::with_capacity(n);
+        // Tracks which input first claimed each output path, so we can reject
+        // batches where two inputs resolve to the same output (e.g. same stem
+        // across directories into --output-dir, or the same file passed twice).
+        // Left undetected, the second encode would silently overwrite the first.
+        let mut claimed: HashMap<PathBuf, PathBuf> = HashMap::new();
+        for input in &self.inputs {
+            if !input.exists() {
+                return Err(format!("file not found: {}", input.display()));
+            }
+
+            let ext = input
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase());
+            if !ext
+                .as_deref()
+                .is_some_and(|e| SUPPORTED_INPUT_FORMATS.contains(&e))
+            {
+                return Err(format!(
+                    "{}: input must be one of: {}",
+                    input.display(),
+                    SUPPORTED_INPUT_FORMATS.join(", ")
+                ));
+            }
+
+            let output = resolve_output_path(
+                input,
+                self.output.as_deref(),
+                self.output_dir.as_deref(),
+                &format,
+            );
+
+            if let Some(prior) = claimed.get(&output) {
+                return Err(format!(
+                    "two inputs map to the same output {}: {} and {}. \
+                     Drop the duplicate, or rename one.",
+                    output.display(),
+                    prior.display(),
+                    input.display(),
+                ));
+            }
+
+            if output.exists() && !self.force {
+                return Err(format!(
+                    "output file already exists: {} (use --force to overwrite)",
+                    output.display()
+                ));
+            }
+
+            claimed.insert(output.clone(), input.clone());
+            options.push(Options {
+                input: input.clone(),
+                output,
+                format: format.clone(),
+                encoder_quality,
+                fps,
+                width,
+                speed: self.speed,
+                playback: self.playback.clone(),
+                start,
+                duration: trim_duration,
+                max_size,
+            });
+        }
+
+        Ok(BatchPlan { options })
+    }
+}
+
+fn resolve_output_path(
+    input: &std::path::Path,
+    explicit_output: Option<&std::path::Path>,
+    output_dir: Option<&std::path::Path>,
+    format: &Format,
+) -> PathBuf {
+    if let Some(o) = explicit_output {
+        return o.to_path_buf();
+    }
+    let file_name = input
+        .file_stem()
+        .map(|s| PathBuf::from(s).with_extension(format.extension()))
+        .unwrap_or_else(|| PathBuf::from(format!("out.{}", format.extension())));
+    match output_dir {
+        Some(dir) => dir.join(file_name),
+        None => input.with_extension(format.extension()),
     }
 }
 
