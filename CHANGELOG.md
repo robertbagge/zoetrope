@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/robertbagge/zoetrope/compare/v0.4.0...v0.5.0) (2026-04-26)
+
+
+### Features
+
+* chunk 3 — batch conversion with --output-dir ([45e906b](https://github.com/robertbagge/zoetrope/commit/45e906b4650cc8a3e48ea7013547ce248b9b5f17))
+
+
+### Bug Fixes
+
+* detect colliding output paths in batch mode ([780b12e](https://github.com/robertbagge/zoetrope/commit/780b12e886c07c4de798e6b6eb6fbc849d905850))
+
 ## [0.4.0](https://github.com/robertbagge/zoetrope/compare/v0.3.0...v0.4.0) (2026-04-24)
 
 
