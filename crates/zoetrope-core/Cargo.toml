@@ -7,4 +7,6 @@ publish = false
 
 [dependencies]
 gifski = { version = "1", default-features = false, features = ["png"] }
+png = "0.17"
 tempfile = "3"
+webp-animation = "0.9"

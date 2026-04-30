@@ -62,18 +62,27 @@ pub fn encode_webp(
     probe_seconds: Option<f64>,
     reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
+    let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
+    let png_pattern = tmp.path().join("frame_%06d.png");
+
     let total_us = effective_duration_us(opts, probe_seconds);
-    reporter.start_phase("encoding", total_us);
-
-    let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
-    cmd.args(["-c:v", "libwebp"]);
-    cmd.args(["-loop", "0"]);
-    cmd.args(["-quality", &params.quality.to_string()]);
-    cmd.arg(&opts.output);
-
-    let res = run_ffmpeg_with_progress(cmd, "webp encoding", reporter);
+    reporter.start_phase("extracting", total_us);
+    let extract = extract_png_frames(opts, params, &png_pattern, reporter);
     reporter.finish_phase();
-    res
+    extract?;
+
+    let mut pngs: Vec<PathBuf> = std::fs::read_dir(tmp.path())
+        .map_err(|e| format!("read frame dir: {e}"))?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("png"))
+        .collect();
+    pngs.sort();
+
+    if pngs.is_empty() {
+        return Err("ffmpeg produced no frames (check trim/speed settings)".into());
+    }
+
+    encode_webp_with_webp_animation(pngs, &opts.output, params.fps, params.quality, reporter)
 }
 
 /// Effective duration of the encoded *output* in microseconds. ffmpeg's
@@ -281,4 +290,104 @@ impl gifski::progress::ProgressReporter for GifskiAdapter<'_> {
     }
 
     fn done(&mut self, _msg: &str) {}
+}
+
+fn encode_webp_with_webp_animation(
+    pngs: Vec<PathBuf>,
+    output: &Path,
+    fps: u32,
+    quality: u8,
+    reporter: &mut dyn ProgressReporter,
+) -> Result<(), String> {
+    use webp_animation::prelude::*;
+    use webp_animation::AnimParams;
+
+    // Decode the first frame to learn dimensions; webp-animation needs them up front.
+    let (width, height, first_rgba) = decode_png_rgba(&pngs[0])?;
+
+    let encoding_config = EncodingConfig {
+        encoding_type: EncodingType::Lossy(LossyEncodingConfig::default()),
+        quality: quality as f32,
+        method: 4, // 0 (fast) – 6 (slower-better). 4 matches libwebp's default.
+    };
+    let options = EncoderOptions {
+        anim_params: AnimParams { loop_count: 0 }, // 0 = infinite
+        encoding_config: Some(encoding_config),
+        ..Default::default()
+    };
+
+    let mut encoder = Encoder::new_with_options((width, height), options)
+        .map_err(|e| format!("webp encoder init: {e:?}"))?;
+
+    let total_frames = pngs.len() as u64;
+    reporter.start_phase("encoding webp", Some(total_frames));
+
+    let frame_ms = |i: usize| -> i32 { (i as i64 * 1000 / fps as i64) as i32 };
+
+    encoder
+        .add_frame(&first_rgba, frame_ms(0))
+        .map_err(|e| format!("add frame 0: {e:?}"))?;
+    reporter.set_position(1);
+
+    for (i, path) in pngs.iter().enumerate().skip(1) {
+        let (w, h, rgba) = decode_png_rgba(path)?;
+        if (w, h) != (width, height) {
+            return Err(format!(
+                "frame {i} size {w}x{h} differs from first frame {width}x{height}"
+            ));
+        }
+        encoder
+            .add_frame(&rgba, frame_ms(i))
+            .map_err(|e| format!("add frame {i}: {e:?}"))?;
+        reporter.set_position(i as u64 + 1);
+    }
+
+    let final_ts = frame_ms(pngs.len());
+    let data = encoder
+        .finalize(final_ts)
+        .map_err(|e| format!("finalize webp: {e:?}"))?;
+    reporter.finish_phase();
+
+    std::fs::write(output, &*data).map_err(|e| format!("write output {}: {e}", output.display()))
+}
+
+/// Decode a PNG file to RGBA8 bytes, returning (width, height, rgba). The
+/// `EXPAND` transformation widens RGB-only PNGs (which is what ffmpeg's
+/// image2 muxer emits for our pipeline) to RGBA8 — webp-animation expects
+/// 4 bytes per pixel.
+fn decode_png_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut decoder = png::Decoder::new(file);
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| format!("png info {}: {e}", path.display()))?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("png decode {}: {e}", path.display()))?;
+    buf.truncate(info.buffer_size());
+
+    // After EXPAND + STRIP_16, color is one of: RGB(24), RGBA(32), GA(16),
+    // Grayscale(8). The screen-recording → ffmpeg pipeline produces RGB24.
+    // Pad to RGBA by appending an opaque alpha byte per pixel.
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut out = Vec::with_capacity((info.width * info.height * 4) as usize);
+            for chunk in buf.chunks_exact(3) {
+                out.extend_from_slice(chunk);
+                out.push(0xff);
+            }
+            out
+        }
+        other => {
+            return Err(format!(
+                "{}: unsupported PNG color type {other:?} (expected RGB or RGBA)",
+                path.display()
+            ));
+        }
+    };
+
+    Ok((info.width, info.height, rgba))
 }

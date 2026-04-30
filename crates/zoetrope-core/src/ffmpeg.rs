@@ -2,7 +2,6 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::options::BatchPlan;
-use crate::settings::Format;
 
 pub fn check_ffmpeg() -> Result<(), String> {
     match Command::new("ffmpeg").arg("-version").output() {
@@ -16,33 +15,12 @@ pub fn check_ffmpeg() -> Result<(), String> {
     }
 }
 
-/// Run once before the batch loop. Catches environment problems that would
-/// otherwise fail per-file (e.g. ffmpeg built without libwebp when a WebP
-/// output is requested), so the user sees one clean error instead of N.
-pub fn preflight(batch: &BatchPlan) -> Result<(), String> {
-    let needs_webp = batch.options.iter().any(|o| o.format == Format::Webp);
-    if needs_webp && !ffmpeg_has_encoder("libwebp") {
-        return Err(
-            "ffmpeg was built without libwebp — install one that includes it \
-             (e.g. `brew install ffmpeg-full` on macOS, standard `ffmpeg` on Ubuntu)"
-                .into(),
-        );
-    }
+/// Run once before the batch loop. Currently a no-op — kept as a hook for
+/// future environment checks that would otherwise fail per-file. (The libwebp
+/// check that previously lived here is gone: WebP encoding now uses the
+/// statically-linked libwebp bundled into the binary, not ffmpeg's encoder.)
+pub fn preflight(_batch: &BatchPlan) -> Result<(), String> {
     Ok(())
-}
-
-pub fn ffmpeg_has_encoder(name: &str) -> bool {
-    let out = match Command::new("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return false,
-    };
-    // Encoder lines look like: " V....D libwebp              libwebp WebP image"
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .any(|line| line.split_whitespace().nth(1) == Some(name))
 }
 
 /// Probe the input's duration in seconds via ffprobe. Returns `None` if
