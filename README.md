@@ -23,7 +23,7 @@ Requires [ffmpeg](https://ffmpeg.org/) with libwebp support if you want WebP out
 (`brew install ffmpeg-full` on macOS; the standard `ffmpeg` package on Ubuntu includes it).
 
 ```sh
-cargo install --path .
+cargo install --path crates/zoetrope-cli
 ```
 
 ## Usage
