@@ -1,0 +1,10 @@
+[package]
+name = "zoetrope-core"
+version.workspace = true
+edition.workspace = true
+description = "Core logic for zoetrope: video → GIF/WebP encoding, fit-to-size, batch planning"
+publish = false
+
+[dependencies]
+gifski = { version = "1", default-features = false, features = ["png"] }
+tempfile = "3"

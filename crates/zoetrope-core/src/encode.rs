@@ -5,33 +5,35 @@ use std::thread;
 
 use tempfile::TempDir;
 
-use crate::cli::{Options, Playback};
-use crate::progress::{ffmpeg_bar, GifskiBar};
+use crate::options::Options;
+use crate::progress::ProgressReporter;
+use crate::settings::Playback;
 
 /// Tunable parameters the fit loop can vary between attempts.
 /// Kept separate from `Options` so the loop can retry with different values
 /// without rebuilding the whole config.
 #[derive(Clone, Debug)]
-pub(crate) struct EncodeParams {
+pub struct EncodeParams {
     pub width: u32,
     pub fps: u32,
     /// Encoder quality knob — 0-100 for both gifski and libwebp.
     pub quality: u8,
 }
 
-pub(crate) fn encode_gif(
+pub fn encode_gif(
     opts: &Options,
     params: &EncodeParams,
     probe_seconds: Option<f64>,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
     let png_pattern = tmp.path().join("frame_%06d.png");
 
     let total_us = effective_duration_us(opts, probe_seconds);
-    let bar = ffmpeg_bar(total_us, "extracting");
-
-    extract_png_frames(opts, params, &png_pattern, &bar)?;
-    bar.finish_and_clear();
+    reporter.start_phase("extracting", total_us);
+    let extract = extract_png_frames(opts, params, &png_pattern, reporter);
+    reporter.finish_phase();
+    extract?;
 
     let mut pngs: Vec<PathBuf> = std::fs::read_dir(tmp.path())
         .map_err(|e| format!("read frame dir: {e}"))?
@@ -44,16 +46,24 @@ pub(crate) fn encode_gif(
         return Err("ffmpeg produced no frames (check trim/speed settings)".into());
     }
 
-    encode_gif_with_gifski(pngs, &opts.output, params.width, params.fps, params.quality)
+    encode_gif_with_gifski(
+        pngs,
+        &opts.output,
+        params.width,
+        params.fps,
+        params.quality,
+        reporter,
+    )
 }
 
-pub(crate) fn encode_webp(
+pub fn encode_webp(
     opts: &Options,
     params: &EncodeParams,
     probe_seconds: Option<f64>,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     let total_us = effective_duration_us(opts, probe_seconds);
-    let bar = ffmpeg_bar(total_us, "encoding");
+    reporter.start_phase("encoding", total_us);
 
     let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
     cmd.args(["-c:v", "libwebp"]);
@@ -61,8 +71,8 @@ pub(crate) fn encode_webp(
     cmd.args(["-quality", &params.quality.to_string()]);
     cmd.arg(&opts.output);
 
-    let res = run_ffmpeg_with_progress(cmd, "webp encoding", &bar);
-    bar.finish_and_clear();
+    let res = run_ffmpeg_with_progress(cmd, "webp encoding", reporter);
+    reporter.finish_phase();
     res
 }
 
@@ -118,12 +128,12 @@ fn extract_png_frames(
     opts: &Options,
     params: &EncodeParams,
     pattern: &Path,
-    bar: &indicatif::ProgressBar,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
     cmd.args(["-start_number", "0"]);
     cmd.arg(pattern);
-    run_ffmpeg_with_progress(cmd, "frame extraction", bar)
+    run_ffmpeg_with_progress(cmd, "frame extraction", reporter)
 }
 
 fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Playback) -> String {
@@ -146,13 +156,13 @@ fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Pla
 }
 
 /// Run ffmpeg with `-progress pipe:1 -nostats`, streaming `out_time_us=N`
-/// key-value lines and ticking the progress bar. Stderr is drained on a
-/// scoped thread so a verbose encoder can't deadlock by filling its stderr
-/// pipe while we block on stdout.
+/// key-value lines and ticking the reporter. Stderr is drained on a scoped
+/// thread so a verbose encoder can't deadlock by filling its stderr pipe
+/// while we block on stdout.
 fn run_ffmpeg_with_progress(
     mut cmd: Command,
     stage: &str,
-    bar: &indicatif::ProgressBar,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     use std::io::Read;
 
@@ -173,11 +183,11 @@ fn run_ffmpeg_with_progress(
             buf
         });
 
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
+        let read = BufReader::new(stdout);
+        for line in read.lines().map_while(Result::ok) {
             if let Some(rest) = line.strip_prefix("out_time_us=") {
                 if let Ok(us) = rest.trim().parse::<u64>() {
-                    bar.set_position(us);
+                    reporter.set_position(us);
                 }
             }
         }
@@ -203,6 +213,7 @@ fn encode_gif_with_gifski(
     width: u32,
     fps: u32,
     quality: u8,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     use gifski::{Repeat, Settings};
 
@@ -222,7 +233,9 @@ fn encode_gif_with_gifski(
     let fps_f = fps as f64;
     let total_frames = pngs.len() as u64;
 
-    thread::scope(|s| -> Result<(), String> {
+    reporter.start_phase("encoding gif", Some(total_frames));
+
+    let result = thread::scope(|s| -> Result<(), String> {
         let collector_handle = s.spawn(move || -> Result<(), String> {
             for (i, path) in pngs.into_iter().enumerate() {
                 let pts = i as f64 / fps_f;
@@ -233,11 +246,10 @@ fn encode_gif_with_gifski(
             Ok(())
         });
 
-        let mut reporter = GifskiBar::new(total_frames);
+        let mut adapter = GifskiAdapter { reporter, seen: 0 };
         let write_result = writer
-            .write(file, &mut reporter)
+            .write(file, &mut adapter)
             .map_err(|e| format!("write gif: {e}"));
-        reporter.finish();
 
         let collect_result = collector_handle
             .join()
@@ -245,5 +257,28 @@ fn encode_gif_with_gifski(
 
         write_result?;
         collect_result
-    })
+    });
+
+    // Belt-and-braces: gifski's `done()` already clears, but the error path
+    // may not invoke it.
+    reporter.finish_phase();
+    result
+}
+
+/// Adapts a `&mut dyn ProgressReporter` to gifski's own `ProgressReporter`
+/// trait. gifski has no init hook, so callers must `start_phase` before
+/// constructing this and `finish_phase` after writing.
+struct GifskiAdapter<'a> {
+    reporter: &'a mut dyn ProgressReporter,
+    seen: u64,
+}
+
+impl gifski::progress::ProgressReporter for GifskiAdapter<'_> {
+    fn increase(&mut self) -> bool {
+        self.seen += 1;
+        self.reporter.set_position(self.seen);
+        true
+    }
+
+    fn done(&mut self, _msg: &str) {}
 }
