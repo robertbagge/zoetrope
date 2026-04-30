@@ -19,11 +19,12 @@ This installs ffmpeg automatically as a dependency.
 
 ### From source
 
-Requires [ffmpeg](https://ffmpeg.org/) with libwebp support if you want WebP output
-(`brew install ffmpeg-full` on macOS; the standard `ffmpeg` package on Ubuntu includes it).
+Requires [ffmpeg](https://ffmpeg.org/) (any standard build — libwebp is bundled
+into the binary, so the stock `brew install ffmpeg` and `apt install ffmpeg`
+packages are sufficient for both GIF and WebP output).
 
 ```sh
-cargo install --path .
+cargo install --path crates/zoetrope-cli
 ```
 
 ## Usage
@@ -119,4 +120,7 @@ extract PNG frames, then hands them to [gifski](https://gif.ski) — which gives
 each frame its own palette with temporal dithering. The result is sharper and
 closer to the source than ffmpeg's single-palette output.
 
-For WebP output, a single ffmpeg pass encodes directly with libwebp.
+For WebP output, ffmpeg extracts the same PNG frames and the
+[webp-animation](https://crates.io/crates/webp-animation) crate (which
+statically embeds libwebp) assembles the animated WebP in-process. This means
+the binary needs no special ffmpeg build — the stock package works.

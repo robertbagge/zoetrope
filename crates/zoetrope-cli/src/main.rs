@@ -1,11 +1,12 @@
 use clap::Parser;
 use std::process::ExitCode;
 
-mod cli;
-mod encode;
-mod fit;
-mod pipeline;
-mod progress;
+use zoetrope_core::{ffmpeg, pipeline};
+
+mod args;
+mod progress_term;
+
+use progress_term::IndicatifReporter;
 
 fn main() -> ExitCode {
     match run() {
@@ -18,9 +19,9 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let batch = cli::Args::parse().into_batch()?;
-    pipeline::check_ffmpeg()?;
-    pipeline::preflight(&batch)?;
+    let batch = args::Args::parse().into_batch()?;
+    ffmpeg::check_ffmpeg()?;
+    ffmpeg::preflight(&batch)?;
 
     let n = batch.options.len();
     let mut any_failed = false;
@@ -28,7 +29,8 @@ fn run() -> Result<(), String> {
         if n > 1 {
             eprintln!("[{}/{n}] {}", i + 1, opts.input.display());
         }
-        if let Err(e) = pipeline::run(opts) {
+        let mut reporter = IndicatifReporter::new();
+        if let Err(e) = pipeline::run(opts, &mut reporter) {
             eprintln!("error: {}: {e}", opts.input.display());
             any_failed = true;
         }

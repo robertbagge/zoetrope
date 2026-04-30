@@ -1,0 +1,66 @@
+# Zoetrope task runner. Run `mise tasks` to list all tasks.
+
+[tools]
+rust = "stable"
+
+# ─── Workspace-wide ─────────────────────────────────────────────────
+
+[tasks.build]
+description = "Build all workspace crates (debug)"
+run = "cargo build --workspace"
+
+[tasks."build:release"]
+description = "Build the zoetrope binary in release mode"
+run = "cargo build --release -p zoetrope-cli"
+
+[tasks.test]
+description = "Run all workspace tests (CLI integration tests require ffmpeg)"
+run = "cargo test --workspace"
+
+[tasks.clippy]
+description = "Lint all workspace crates, deny warnings (matches CI)"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.fmt]
+description = "Format all workspace crates"
+run = "cargo fmt --all"
+
+[tasks."fmt:check"]
+description = "Check formatting without writing changes (matches CI)"
+run = "cargo fmt --all -- --check"
+
+[tasks.ci]
+description = "Run the full CI pipeline locally: fmt check, clippy, test"
+depends = ["fmt:check", "clippy", "test"]
+
+# ─── zoetrope-core ──────────────────────────────────────────────────
+
+[tasks."core:build"]
+description = "Build zoetrope-core"
+run = "cargo build -p zoetrope-core"
+
+[tasks."core:test"]
+description = "Test zoetrope-core (unit tests only — no ffmpeg required)"
+run = "cargo test -p zoetrope-core"
+
+[tasks."core:clippy"]
+description = "Lint zoetrope-core"
+run = "cargo clippy -p zoetrope-core --all-targets -- -D warnings"
+
+# ─── zoetrope-cli ───────────────────────────────────────────────────
+
+[tasks."cli:build"]
+description = "Build the zoetrope binary (debug)"
+run = "cargo build -p zoetrope-cli"
+
+[tasks."cli:test"]
+description = "Run CLI integration tests (requires ffmpeg)"
+run = "cargo test -p zoetrope-cli"
+
+[tasks."cli:clippy"]
+description = "Lint zoetrope-cli"
+run = "cargo clippy -p zoetrope-cli --all-targets -- -D warnings"
+
+[tasks."cli:run"]
+description = "Run the zoetrope CLI; pass args after the task name (e.g. `mise run cli:run demo.mov`)"
+run = 'cargo run -p zoetrope-cli -- "$@"'

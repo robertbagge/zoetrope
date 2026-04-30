@@ -1,19 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub fn libwebp_available() -> bool {
-    let out = match Command::new("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return false,
-    };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .any(|line| line.split_whitespace().nth(1) == Some("libwebp"))
-}
-
 pub fn fixture(dir: &Path, name: &str, ext: &str) -> PathBuf {
     let path = dir.join(format!("{name}.{ext}"));
     let output = Command::new("ffmpeg")

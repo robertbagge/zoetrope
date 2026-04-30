@@ -1,6 +1,8 @@
-use crate::cli::{Format, Options};
 use crate::encode::EncodeParams;
+use crate::options::Options;
 use crate::pipeline;
+use crate::progress::ProgressReporter;
+use crate::settings::Format;
 
 const MAX_ATTEMPTS: u32 = 5;
 const MIN_WIDTH: u32 = 240;
@@ -11,24 +13,25 @@ const MIN_WEBP_QUALITY: u8 = 30;
 /// Encode, measure, shrink, retry — until the output fits under `target`
 /// or all knobs hit their floor. Knobs are monotonically non-increasing,
 /// so the final attempt is always the smallest the loop can produce.
-pub(crate) fn fit_to_size(
+pub fn fit_to_size(
     opts: &Options,
     start: EncodeParams,
     target: u64,
     probe_seconds: Option<f64>,
+    reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
     let mut params = start;
     let mut last_size: u64 = 0;
 
     for attempt in 1..=MAX_ATTEMPTS {
         if attempt > 1 {
-            eprintln!(
+            reporter.status(&format!(
                 "fit attempt {attempt}/{MAX_ATTEMPTS} ({}px, {}fps, q{})",
                 params.width, params.fps, params.quality
-            );
+            ));
         }
 
-        pipeline::encode(opts, &params, probe_seconds)?;
+        pipeline::encode(opts, &params, probe_seconds, reporter)?;
         last_size = std::fs::metadata(&opts.output)
             .map_err(|e| format!("stat output: {e}"))?
             .len();
