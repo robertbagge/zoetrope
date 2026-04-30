@@ -26,26 +26,7 @@ pub fn encode_gif(
     probe_seconds: Option<f64>,
     reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
-    let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
-    let png_pattern = tmp.path().join("frame_%06d.png");
-
-    let total_us = effective_duration_us(opts, probe_seconds);
-    reporter.start_phase("extracting", total_us);
-    let extract = extract_png_frames(opts, params, &png_pattern, reporter);
-    reporter.finish_phase();
-    extract?;
-
-    let mut pngs: Vec<PathBuf> = std::fs::read_dir(tmp.path())
-        .map_err(|e| format!("read frame dir: {e}"))?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("png"))
-        .collect();
-    pngs.sort();
-
-    if pngs.is_empty() {
-        return Err("ffmpeg produced no frames (check trim/speed settings)".into());
-    }
-
+    let (_tmp, pngs) = extract_frames_to_tempdir(opts, params, probe_seconds, reporter)?;
     encode_gif_with_gifski(
         pngs,
         &opts.output,
@@ -62,6 +43,19 @@ pub fn encode_webp(
     probe_seconds: Option<f64>,
     reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
+    let (_tmp, pngs) = extract_frames_to_tempdir(opts, params, probe_seconds, reporter)?;
+    encode_webp_with_webp_animation(pngs, &opts.output, params.fps, params.quality, reporter)
+}
+
+/// Extract scaled PNG frames into a fresh tempdir, then enumerate and sort
+/// them. Returns the tempdir alongside the frame paths so the caller keeps
+/// the directory alive for the lifetime of the assembly step.
+fn extract_frames_to_tempdir(
+    opts: &Options,
+    params: &EncodeParams,
+    probe_seconds: Option<f64>,
+    reporter: &mut dyn ProgressReporter,
+) -> Result<(TempDir, Vec<PathBuf>), String> {
     let tmp = TempDir::new().map_err(|e| format!("create tempdir: {e}"))?;
     let png_pattern = tmp.path().join("frame_%06d.png");
 
@@ -82,7 +76,7 @@ pub fn encode_webp(
         return Err("ffmpeg produced no frames (check trim/speed settings)".into());
     }
 
-    encode_webp_with_webp_animation(pngs, &opts.output, params.fps, params.quality, reporter)
+    Ok((tmp, pngs))
 }
 
 /// Effective duration of the encoded *output* in microseconds. ffmpeg's
