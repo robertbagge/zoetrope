@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use tempfile::TempDir;
 
 mod common;
-use common::{decode_gif, fixture, libwebp_available, mov_fixture};
+use common::{decode_gif, fixture, mov_fixture};
 
 fn zoetrope() -> Command {
     Command::cargo_bin("zoetrope").expect("binary not built")
@@ -307,11 +307,6 @@ fn test_end_and_duration_conflict_errors() {
 
 #[test]
 fn test_webp_output_produces_valid_file() {
-    if !libwebp_available() {
-        eprintln!("skipping: ffmpeg built without libwebp");
-        return;
-    }
-
     let dir = TempDir::new().unwrap();
     let input = mov_fixture(dir.path());
     let output = dir.path().join("in.webp");
@@ -331,11 +326,6 @@ fn test_webp_output_produces_valid_file() {
 
 #[test]
 fn test_webp_default_extension() {
-    if !libwebp_available() {
-        eprintln!("skipping: ffmpeg built without libwebp");
-        return;
-    }
-
     let dir = TempDir::new().unwrap();
     let input = mov_fixture(dir.path());
 
@@ -353,24 +343,6 @@ fn test_webp_default_extension() {
         !dir.path().join("in.gif").exists(),
         "gif should not be created when -F webp is used"
     );
-}
-
-#[test]
-fn test_webp_missing_encoder_errors_cleanly() {
-    if libwebp_available() {
-        eprintln!("skipping: libwebp is available, so this error path is unreachable");
-        return;
-    }
-
-    let dir = TempDir::new().unwrap();
-    let input = mov_fixture(dir.path());
-
-    zoetrope()
-        .arg(&input)
-        .args(["-F", "webp"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("libwebp"));
 }
 
 // ─── Speed ──────────────────────────────────────────────────────────────────
@@ -467,11 +439,6 @@ fn test_boomerang_doubles_frames() {
 
 #[test]
 fn test_output_extension_infers_webp_format() {
-    if !libwebp_available() {
-        eprintln!("skipping: ffmpeg built without libwebp");
-        return;
-    }
-
     let dir = TempDir::new().unwrap();
     let input = mov_fixture(dir.path());
     let custom = dir.path().join("custom.webp");
