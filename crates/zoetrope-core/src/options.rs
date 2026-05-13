@@ -91,33 +91,46 @@ impl BatchPlan {
             }
         }
 
+        if matches!(inputs.width, Some(0)) {
+            return Err("--width must be greater than zero".into());
+        }
+        if matches!(inputs.height, Some(0)) {
+            return Err("--height must be greater than zero".into());
+        }
+
         // Still-image inputs don't have a timeline, framerate, or iterative
-        // size loop. Reject the flags that would otherwise be silently ignored.
+        // size loop. Reject the flags that would otherwise be silently ignored,
+        // and tell the user how to proceed (drop the flag or use a video).
         let any_still = inputs.inputs.iter().any(|p| is_still_image_path(p));
         if any_still {
+            let reject = |flag: &str| -> Result<Self, String> {
+                Err(format!(
+                    "{flag} is not valid for still-image input. Drop it, or use a video input."
+                ))
+            };
             if inputs.speed.is_some() {
-                return Err("--speed is not valid for still-image input".into());
+                return reject("--speed");
             }
             if inputs.fps.is_some() {
-                return Err("--fps is not valid for still-image input".into());
+                return reject("--fps");
             }
             if !matches!(inputs.playback, Playback::Normal) {
-                return Err("--playback is not valid for still-image input".into());
+                return reject("--playback");
             }
             if inputs.start_secs.is_some() {
-                return Err("--start is not valid for still-image input".into());
+                return reject("--start");
             }
             if inputs.end_secs.is_some() {
-                return Err("--end is not valid for still-image input".into());
+                return reject("--end");
             }
             if inputs.duration_secs.is_some() {
-                return Err("--duration is not valid for still-image input".into());
+                return reject("--duration");
             }
             if inputs.max_size_bytes.is_some() {
-                return Err("--max-size is not valid for still-image input".into());
+                return reject("--max-size");
             }
             if inputs.platform.is_some() {
-                return Err("--for is not valid for still-image input".into());
+                return reject("--for");
             }
         }
 
