@@ -69,6 +69,11 @@ fn shrink_step(
     let min_quality = match format {
         Format::Gif => MIN_GIFSKI_QUALITY,
         Format::Webp => MIN_WEBP_QUALITY,
+        Format::Png | Format::Jpeg => {
+            // Still-image formats reject --max-size in options validation,
+            // so the fit loop is unreachable for them.
+            unreachable!("fit loop is not used for still-image formats")
+        }
     };
 
     let width_at_floor = current.width <= MIN_WIDTH;
@@ -102,6 +107,7 @@ fn shrink_step(
                 next.fps = shrink_fps(current.fps);
             }
         }
+        Format::Png | Format::Jpeg => unreachable!("fit loop is not used for still-image formats"),
     }
 
     Some(next)

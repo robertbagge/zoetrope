@@ -15,6 +15,10 @@ use crate::settings::Playback;
 #[derive(Clone, Debug)]
 pub struct EncodeParams {
     pub width: u32,
+    /// Optional explicit output height. When `None`, ffmpeg derives it from
+    /// the source aspect ratio. When `Some`, the filter chain stretches to
+    /// the exact `width × height` box (no padding, no preserving aspect).
+    pub height: Option<u32>,
     pub fps: u32,
     /// Encoder quality knob — 0-100 for both gifski and libwebp.
     pub quality: u8,
@@ -110,8 +114,8 @@ fn effective_duration_us(opts: &Options, probe_seconds: Option<f64>) -> Option<u
 /// Builds the ffmpeg command shared by PNG extraction and WebP encoding:
 /// `-y [-ss start] -i input [-t duration] -filter_complex <chain> -map [out]`.
 /// Callers append output-specific flags and the output path.
-fn ffmpeg_base_command(opts: &Options, fps: u32, width: u32) -> Command {
-    let filter = build_filter_complex(fps, width, opts.speed, &opts.playback);
+fn ffmpeg_base_command(opts: &Options, fps: u32, width: u32, height: Option<u32>) -> Command {
+    let filter = build_filter_complex(fps, width, height, opts.speed, &opts.playback);
 
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-y");
@@ -133,13 +137,19 @@ fn extract_png_frames(
     pattern: &Path,
     reporter: &mut dyn ProgressReporter,
 ) -> Result<(), String> {
-    let mut cmd = ffmpeg_base_command(opts, params.fps, params.width);
+    let mut cmd = ffmpeg_base_command(opts, params.fps, params.width, params.height);
     cmd.args(["-start_number", "0"]);
     cmd.arg(pattern);
     run_ffmpeg_with_progress(cmd, "frame extraction", reporter)
 }
 
-fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Playback) -> String {
+fn build_filter_complex(
+    fps: u32,
+    width: u32,
+    height: Option<u32>,
+    speed: Option<f64>,
+    playback: &Playback,
+) -> String {
     let mut chain = String::from("[0:v]");
 
     if let Some(s) = speed {
@@ -154,7 +164,9 @@ fn build_filter_complex(fps: u32, width: u32, speed: Option<f64>, playback: &Pla
         }
     }
 
-    chain.push_str(&format!("fps={fps},scale={width}:-1:flags=lanczos[out]"));
+    // `-1` for height tells ffmpeg "derive from width preserving aspect".
+    let h = height.map(|h| h.to_string()).unwrap_or_else(|| "-1".into());
+    chain.push_str(&format!("fps={fps},scale={width}:{h}:flags=lanczos[out]"));
     chain
 }
 
