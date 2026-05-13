@@ -1,6 +1,6 @@
 [package]
 name = "zoetrope-cli"
-version.workspace = true
+version = "0.5.0"
 edition.workspace = true
 description = "Convert screen recordings to GIF or animated WebP"
 publish = false
