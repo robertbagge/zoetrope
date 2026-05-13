@@ -4,7 +4,8 @@
   "include-component-in-tag": false,
   "packages": {
     "crates/zoetrope-cli": {
-      "package-name": "zoetrope"
+      "package-name": "zoetrope",
+      "extra-files": ["../../Cargo.toml"]
     }
   }
 }
