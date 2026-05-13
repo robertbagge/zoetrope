@@ -4,7 +4,7 @@
 
 ---
 
-A fast CLI that converts screen recordings into high-quality GIFs (via [gifski](https://gif.ski)) or animated WebP (via ffmpeg/libwebp).
+A fast CLI that converts screen recordings into high-quality GIFs (via [gifski](https://gif.ski)) or animated WebP (via ffmpeg/libwebp). Also handles one-shot still-image resize and format conversion (PNG / JPEG / WebP).
 
 ## Install
 
@@ -81,6 +81,31 @@ zoetrope *.mov --for slack --output-dir ./slack/
 All other flags (`--for`, `--width`, `--speed`, `-q`, etc.) apply uniformly to
 every file. `-o/--output` is single-input only — use `--output-dir` for batch.
 
+### Still images
+
+Drop a `.png`, `.jpg`, `.jpeg`, or `.webp` in and zoetrope will resize/convert
+it in one shot — no ffmpeg involved on this path. Output formats: `png`, `jpg`,
+`webp`, or a single-frame `gif`.
+
+```sh
+zoetrope photo.png --width 432 -F webp       # PNG → WebP, aspect-preserved
+zoetrope photo.png --width 432 --height 432  # exact 432×432 (stretch)
+zoetrope shot.jpg --width 800 -F png         # JPEG → PNG
+zoetrope shot.webp --width 320 -F jpg        # WebP → JPEG
+zoetrope *.png --width 600 --output-dir ./web/
+```
+
+Sizing rules:
+
+- `--width W --height H` together → stretch to exactly W×H (no padding, no crop).
+- `--width W` alone → preserve aspect, derive height from the source.
+- `--height H` alone → preserve aspect, derive width from the source.
+- Neither → use the quality preset's width with aspect preserved.
+
+Temporal flags (`--speed`, `--fps`, `--playback`, `--start`, `--end`,
+`--duration`, `--max-size`, `--for`) don't apply to still images and are
+rejected with a clear error.
+
 ## Smart Sizing
 
 `--max-size <SIZE>` iteratively shrinks the output until it fits. Accepts
@@ -124,3 +149,10 @@ For WebP output, ffmpeg extracts the same PNG frames and the
 [webp-animation](https://crates.io/crates/webp-animation) crate (which
 statically embeds libwebp) assembles the animated WebP in-process. This means
 the binary needs no special ffmpeg build — the stock package works.
+
+For still-image input (PNG, JPEG, WebP), zoetrope skips ffmpeg entirely. The
+[`image`](https://crates.io/crates/image) crate decodes the source, resizes
+with Lanczos3, and re-encodes to the target format. WebP output uses libwebp
+(via the [`webp`](https://crates.io/crates/webp) crate) for lossy quality
+control; PNG, JPEG, and single-frame GIF are handled by `image`'s built-in
+encoders.
