@@ -17,8 +17,8 @@ pub fn encode_still_image(
 ) -> Result<(), String> {
     reporter.start_phase("converting", Some(1));
 
-    let img = image::open(&opts.input)
-        .map_err(|e| format!("decode {}: {e}", opts.input.display()))?;
+    let img =
+        image::open(&opts.input).map_err(|e| format!("decode {}: {e}", opts.input.display()))?;
 
     let (target_w, target_h) = compute_target_size(
         img.width(),
@@ -83,8 +83,7 @@ fn save_png(img: &DynamicImage, output: &Path) -> Result<(), String> {
 }
 
 fn save_jpeg(img: &DynamicImage, output: &Path, quality: u8) -> Result<(), String> {
-    let file = File::create(output)
-        .map_err(|e| format!("create {}: {e}", output.display()))?;
+    let file = File::create(output).map_err(|e| format!("create {}: {e}", output.display()))?;
     let mut writer = BufWriter::new(file);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, quality);
     encoder
@@ -98,8 +97,7 @@ fn save_webp(img: &DynamicImage, output: &Path, quality: u8) -> Result<(), Strin
     let rgba = img.to_rgba8();
     let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
     let mem = encoder.encode(quality as f32);
-    std::fs::write(output, &*mem)
-        .map_err(|e| format!("write webp {}: {e}", output.display()))
+    std::fs::write(output, &*mem).map_err(|e| format!("write webp {}: {e}", output.display()))
 }
 
 fn save_gif_single_frame(img: &DynamicImage, output: &Path) -> Result<(), String> {
@@ -107,8 +105,7 @@ fn save_gif_single_frame(img: &DynamicImage, output: &Path) -> Result<(), String
     use image::Frame;
 
     let rgba = img.to_rgba8();
-    let file = File::create(output)
-        .map_err(|e| format!("create {}: {e}", output.display()))?;
+    let file = File::create(output).map_err(|e| format!("create {}: {e}", output.display()))?;
     let mut encoder = GifEncoder::new(BufWriter::new(file));
     encoder
         .encode_frame(Frame::new(rgba))
