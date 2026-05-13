@@ -6,6 +6,7 @@ pub mod parse;
 pub mod pipeline;
 pub mod progress;
 pub mod settings;
+pub mod still;
 
 pub use options::{BatchInputs, BatchPlan, Options};
 pub use progress::{NoopReporter, ProgressReporter};

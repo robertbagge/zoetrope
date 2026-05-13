@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::settings::{Format, Platform, Playback, Quality, SUPPORTED_INPUT_FORMATS};
+use crate::settings::{
+    is_still_image_ext, Format, Platform, Playback, Quality, SUPPORTED_INPUT_FORMATS,
+};
 
 /// Validated, ready-to-run view of the inputs for a single encode. Every
 /// field has been parsed, normalized, and range-checked; `pipeline::run`
@@ -11,16 +13,38 @@ pub struct Options {
     pub output: PathBuf,
     pub format: Format,
     /// Encoder quality knob (0-100). For GIF this is gifski_quality;
-    /// for WebP it's libwebp's quality. Already resolved from --quality,
-    /// platform preset, and defaults.
+    /// for WebP/JPEG it's libwebp's / JPEG's quality. Already resolved from
+    /// --quality, platform preset, and defaults.
     pub encoder_quality: u8,
     pub fps: u32,
     pub width: u32,
+    /// Explicit user height. When `Some` together with `width_user_set = true`
+    /// this means "stretch to exactly W×H" on the still-image path.
+    pub height: Option<u32>,
+    /// True iff the user passed `--width`. Lets the still-image path tell
+    /// "user asked for 432" apart from "preset chose 480".
+    pub width_user_set: bool,
     pub speed: Option<f64>,
     pub playback: Playback,
     pub start: Option<f64>,
     pub duration: Option<f64>,
     pub max_size: Option<u64>,
+}
+
+impl Options {
+    /// True when this input is a single still image (png/jpg/jpeg/webp).
+    /// The pipeline branches on this to skip ffmpeg frame extraction and
+    /// the animated-encoder path.
+    pub fn is_still_input(&self) -> bool {
+        is_still_image_path(&self.input)
+    }
+}
+
+pub fn is_still_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .is_some_and(|e| is_still_image_ext(&e))
 }
 
 pub struct BatchPlan {
@@ -39,6 +63,7 @@ pub struct BatchInputs {
     pub quality: Option<Quality>,
     pub fps: Option<u32>,
     pub width: Option<u32>,
+    pub height: Option<u32>,
     pub speed: Option<f64>,
     pub playback: Playback,
     pub platform: Option<Platform>,
@@ -63,6 +88,49 @@ impl BatchPlan {
         if let Some(speed) = inputs.speed {
             if !(speed.is_finite() && speed > 0.0) {
                 return Err(format!("--speed must be a positive number, got {speed}"));
+            }
+        }
+
+        if matches!(inputs.width, Some(0)) {
+            return Err("--width must be greater than zero".into());
+        }
+        if matches!(inputs.height, Some(0)) {
+            return Err("--height must be greater than zero".into());
+        }
+
+        // Still-image inputs don't have a timeline, framerate, or iterative
+        // size loop. Reject the flags that would otherwise be silently ignored,
+        // and tell the user how to proceed (drop the flag or use a video).
+        let any_still = inputs.inputs.iter().any(|p| is_still_image_path(p));
+        if any_still {
+            let reject = |flag: &str| -> Result<Self, String> {
+                Err(format!(
+                    "{flag} is not valid for still-image input. Drop it, or use a video input."
+                ))
+            };
+            if inputs.speed.is_some() {
+                return reject("--speed");
+            }
+            if inputs.fps.is_some() {
+                return reject("--fps");
+            }
+            if !matches!(inputs.playback, Playback::Normal) {
+                return reject("--playback");
+            }
+            if inputs.start_secs.is_some() {
+                return reject("--start");
+            }
+            if inputs.end_secs.is_some() {
+                return reject("--end");
+            }
+            if inputs.duration_secs.is_some() {
+                return reject("--duration");
+            }
+            if inputs.max_size_bytes.is_some() {
+                return reject("--max-size");
+            }
+            if inputs.platform.is_some() {
+                return reject("--for");
             }
         }
 
@@ -134,10 +202,13 @@ impl BatchPlan {
             .or_else(|| platform_defaults.as_ref().map(|p| p.max_size));
 
         // --for locks format to GIF, so `gifski_quality` is the right knob when
-        // the platform default wins.
+        // the platform default wins. JPEG borrows WebP's lossy-quality scale.
         let format_quality = match format {
             Format::Gif => quality_settings.gifski_quality,
-            Format::Webp => quality_settings.webp_quality,
+            Format::Webp | Format::Jpeg => quality_settings.webp_quality,
+            // PNG is lossless; quality is unused by the encoder but we still
+            // need a value to populate the field.
+            Format::Png => quality_settings.webp_quality,
         };
         let encoder_quality = preset_pick(
             user_set_quality,
@@ -184,6 +255,18 @@ impl BatchPlan {
                 ));
             }
 
+            // PNG/JPEG output requires a still-image input — videos have many
+            // frames and no single one is the "right" one to keep.
+            let input_is_still = ext.as_deref().is_some_and(is_still_image_ext);
+            if format.is_still_only() && !input_is_still {
+                return Err(format!(
+                    "{}: --format {} requires a still-image input (png/jpg/jpeg/webp); \
+                     got a video. Use --format gif or webp instead.",
+                    input.display(),
+                    format.extension(),
+                ));
+            }
+
             let output = resolve_output_path(
                 input,
                 inputs.output.as_deref(),
@@ -216,6 +299,8 @@ impl BatchPlan {
                 encoder_quality,
                 fps,
                 width,
+                height: inputs.height,
+                width_user_set: inputs.width.is_some(),
                 speed: inputs.speed,
                 playback: inputs.playback.clone(),
                 start: inputs.start_secs,
@@ -262,6 +347,8 @@ fn format_from_path(path: &Path) -> Option<Format> {
     match ext.as_str() {
         "gif" => Some(Format::Gif),
         "webp" => Some(Format::Webp),
+        "png" => Some(Format::Png),
+        "jpg" | "jpeg" => Some(Format::Jpeg),
         _ => None,
     }
 }

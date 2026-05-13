@@ -34,6 +34,12 @@ Examples:
   zoetrope a.mov b.mp4 c.webm                  # mixed formats
   zoetrope *.mov --output-dir ./gifs/          # collect outputs in one dir
   zoetrope *.mov --for slack --output-dir ./slack/
+
+  # Still-image conversion / resize
+  zoetrope photo.png --width 432 -F webp       # PNG → WebP, aspect-preserved
+  zoetrope photo.png --width 432 --height 432  # exact 432×432 (stretch)
+  zoetrope shot.jpg --width 800 -F png         # JPEG → PNG
+  zoetrope shot.webp --width 320 -F jpg        # WebP → JPEG
 ";
 
 #[derive(Clone, ValueEnum)]
@@ -63,8 +69,13 @@ impl CliQuality {
 pub enum CliFormat {
     /// GIF — universal compatibility, larger files
     Gif,
-    /// Animated WebP — 2-5x smaller files, 97% browser support
+    /// WebP — animated when input is a video, still when input is an image
     Webp,
+    /// PNG — still image only (lossless)
+    Png,
+    /// JPEG — still image only (lossy)
+    #[value(alias = "jpeg")]
+    Jpg,
 }
 
 impl CliFormat {
@@ -72,6 +83,8 @@ impl CliFormat {
         match self {
             CliFormat::Gif => Format::Gif,
             CliFormat::Webp => Format::Webp,
+            CliFormat::Png => Format::Png,
+            CliFormat::Jpg => Format::Jpeg,
         }
     }
 }
@@ -128,7 +141,9 @@ impl CliPlatform {
 #[command(about = "Convert screen recordings to high-quality GIFs or WebP")]
 #[command(after_help = EXAMPLES)]
 pub struct Args {
-    /// Input video file(s) (mov, mp4, webm, mkv, avi). Pass multiple for batch mode.
+    /// Input file(s). Videos (mov, mp4, webm, mkv, avi) → animated GIF/WebP.
+    /// Still images (png, jpg, jpeg, webp) → one-shot resize/convert to png,
+    /// jpg, webp, or single-frame gif. Pass multiple for batch mode.
     #[arg(required = true, num_args = 1..)]
     pub inputs: Vec<PathBuf>,
 
@@ -155,6 +170,11 @@ pub struct Args {
     /// Output width in pixels (overrides quality preset)
     #[arg(long)]
     pub width: Option<u32>,
+
+    /// Output height in pixels. With --width, forces an exact W×H box (stretch).
+    /// Alone, preserves aspect from the input.
+    #[arg(long)]
+    pub height: Option<u32>,
 
     /// Playback speed multiplier (e.g. 2, 0.5)
     #[arg(long)]
@@ -205,6 +225,7 @@ impl Args {
             quality: self.quality.map(CliQuality::into_core),
             fps: self.fps,
             width: self.width,
+            height: self.height,
             speed: self.speed,
             playback: self.playback.into_core(),
             platform: self.for_.map(CliPlatform::into_core),

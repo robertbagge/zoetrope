@@ -1,4 +1,13 @@
-pub const SUPPORTED_INPUT_FORMATS: &[&str] = &["mov", "mp4", "webm", "mkv", "avi"];
+pub const SUPPORTED_INPUT_FORMATS: &[&str] = &[
+    "mov", "mp4", "webm", "mkv", "avi", // video
+    "png", "jpg", "jpeg", "webp", // still image
+];
+
+/// Extensions that represent a single still image input (no frame extraction,
+/// no animation). Callers should lowercase before passing.
+pub fn is_still_image_ext(ext: &str) -> bool {
+    matches!(ext, "png" | "jpg" | "jpeg" | "webp")
+}
 
 pub struct QualitySettings {
     pub width: u32,
@@ -54,8 +63,12 @@ impl Quality {
 pub enum Format {
     /// GIF — universal compatibility, larger files
     Gif,
-    /// Animated WebP — 2-5x smaller files, 97% browser support
+    /// WebP — animated when input is a video, still when input is a single image.
     Webp,
+    /// PNG — still image only (lossless).
+    Png,
+    /// JPEG — still image only (lossy).
+    Jpeg,
 }
 
 impl Format {
@@ -63,7 +76,15 @@ impl Format {
         match self {
             Format::Gif => "gif",
             Format::Webp => "webp",
+            Format::Png => "png",
+            Format::Jpeg => "jpg",
         }
+    }
+
+    /// True when this output format only makes sense for a still-image input
+    /// (rejected for video inputs in `BatchPlan::build`).
+    pub fn is_still_only(&self) -> bool {
+        matches!(self, Format::Png | Format::Jpeg)
     }
 }
 
@@ -142,5 +163,36 @@ impl Platform {
             Platform::Twitter => "twitter",
             Platform::Email => "email",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_still_image_ext_truth_table() {
+        for e in ["png", "jpg", "jpeg", "webp"] {
+            assert!(is_still_image_ext(e), "{e} should be a still image");
+        }
+        for e in ["mov", "mp4", "webm", "mkv", "avi", "gif", "foo", ""] {
+            assert!(!is_still_image_ext(e), "{e} should not be a still image");
+        }
+    }
+
+    #[test]
+    fn format_extensions() {
+        assert_eq!(Format::Gif.extension(), "gif");
+        assert_eq!(Format::Webp.extension(), "webp");
+        assert_eq!(Format::Png.extension(), "png");
+        assert_eq!(Format::Jpeg.extension(), "jpg");
+    }
+
+    #[test]
+    fn still_only_formats() {
+        assert!(Format::Png.is_still_only());
+        assert!(Format::Jpeg.is_still_only());
+        assert!(!Format::Gif.is_still_only());
+        assert!(!Format::Webp.is_still_only());
     }
 }
