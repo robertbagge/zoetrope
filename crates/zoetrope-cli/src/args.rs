@@ -171,9 +171,8 @@ pub struct Args {
     #[arg(long)]
     pub width: Option<u32>,
 
-    /// Output height in pixels. Combined with --width forces an exact W×H box
-    /// (videos: stretch via ffmpeg scale filter; still images: stretch via
-    /// Lanczos resize). Alone, preserves aspect from the input.
+    /// Output height in pixels. With --width, forces an exact W×H box (stretch).
+    /// Alone, preserves aspect from the input.
     #[arg(long)]
     pub height: Option<u32>,
 
