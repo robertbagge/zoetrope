@@ -3,7 +3,10 @@ use predicates::prelude::*;
 use tempfile::TempDir;
 
 mod common;
-use common::{decode_gif, fixture, mov_fixture};
+use common::{
+    decode_gif, decode_image_dims, fixture, image_fixture, is_animated_webp, mov_fixture,
+    png_fixture,
+};
 
 fn zoetrope() -> Command {
     Command::cargo_bin("zoetrope").expect("binary not built")
@@ -71,7 +74,9 @@ fn test_missing_input_errors() {
 #[test]
 fn test_unsupported_extension_errors() {
     let dir = TempDir::new().unwrap();
-    let input = dir.path().join("image.png");
+    // `.png` is now a supported still-image input, so pick a truly unsupported
+    // extension to exercise the rejection path.
+    let input = dir.path().join("clip.xyz");
     std::fs::write(&input, b"").unwrap();
 
     zoetrope()
@@ -81,7 +86,7 @@ fn test_unsupported_extension_errors() {
         .stderr(predicate::str::contains("input must be one of:"))
         .stderr(predicate::str::contains("mov"))
         .stderr(predicate::str::contains("mp4"))
-        .stderr(predicate::str::contains("webm"));
+        .stderr(predicate::str::contains("png"));
 }
 
 // ─── Quality presets ────────────────────────────────────────────────────────
@@ -980,4 +985,227 @@ fn test_fixture_helper_generates_other_formats() {
         let size = std::fs::metadata(&path).unwrap().len();
         assert!(size > 0, "{ext} fixture should be non-empty");
     }
+}
+
+// ─── Image conversion ───────────────────────────────────────────────────────
+
+#[test]
+fn test_png_input_produces_webp_at_exact_size() {
+    // The headline user case: 2048x2048 PNG → 432x432 still WebP.
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (2048, 2048));
+    let output = dir.path().join("out.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "432", "--height", "432"])
+        .args(["-F", "webp"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert!(output.exists());
+    assert_eq!(decode_image_dims(&output), (432, 432));
+    assert!(
+        !is_animated_webp(&output),
+        "still-image input should produce still WebP, not animated"
+    );
+}
+
+#[test]
+fn test_jpg_input_produces_png_aspect_preserved() {
+    let dir = TempDir::new().unwrap();
+    let input = image_fixture(dir.path(), "in", "jpg", (800, 600));
+    let output = dir.path().join("out.png");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "400"])
+        .args(["-F", "png"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (400, 300));
+}
+
+#[test]
+fn test_webp_input_produces_jpg() {
+    let dir = TempDir::new().unwrap();
+    let input = image_fixture(dir.path(), "in", "webp", (640, 640));
+    let output = dir.path().join("out.jpg");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "320"])
+        .args(["-F", "jpg"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (320, 320));
+}
+
+#[test]
+fn test_aspect_preserve_width_only() {
+    let dir = TempDir::new().unwrap();
+    let input = image_fixture(dir.path(), "in", "png", (2048, 1024));
+    let output = dir.path().join("out.png");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "432"])
+        .args(["-F", "png"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (432, 216));
+}
+
+#[test]
+fn test_aspect_preserve_height_only() {
+    let dir = TempDir::new().unwrap();
+    let input = image_fixture(dir.path(), "in", "png", (2048, 1024));
+    let output = dir.path().join("out.png");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--height", "216"])
+        .args(["-F", "png"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (432, 216));
+}
+
+#[test]
+fn test_stretch_when_both_dimensions_given() {
+    // Non-matching source aspect → 432×432 stretch (no letterbox, no crop).
+    let dir = TempDir::new().unwrap();
+    let input = image_fixture(dir.path(), "in", "png", (2048, 1024));
+    let output = dir.path().join("out.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "432", "--height", "432"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (432, 432));
+}
+
+#[test]
+fn test_png_input_format_inferred_from_webp_output_extension() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+    let output = dir.path().join("out.webp");
+
+    // No -F flag — format inferred from output extension.
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "320"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (320, 240));
+    assert!(!is_animated_webp(&output));
+}
+
+#[test]
+fn test_png_input_to_gif_single_frame() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+    let output = dir.path().join("out.gif");
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "320"])
+        .args(["-F", "gif"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    let (w, h, frames) = decode_gif(&output);
+    assert_eq!((w as u32, h as u32), (320, 240));
+    assert_eq!(frames, 1, "still-image input should yield a 1-frame GIF");
+}
+
+#[test]
+fn test_video_input_to_png_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "png"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires a still-image input"));
+}
+
+#[test]
+fn test_still_input_with_speed_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+
+    zoetrope()
+        .arg(&input)
+        .args(["--speed", "2"])
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--speed"));
+}
+
+#[test]
+fn test_still_input_with_fps_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+
+    zoetrope()
+        .arg(&input)
+        .args(["--fps", "30"])
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--fps"));
+}
+
+#[test]
+fn test_still_input_with_max_size_errors() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+
+    zoetrope()
+        .arg(&input)
+        .args(["--max-size", "100kb"])
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--max-size"));
+}
+
+#[test]
+fn test_video_to_webp_still_animated_regression() {
+    // Regression check: video input → .webp still produces an animated WebP,
+    // not the new still encoder.
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+    let output = dir.path().join("in.webp");
+
+    zoetrope()
+        .arg(&input)
+        .args(["-F", "webp"])
+        .assert()
+        .success();
+
+    assert!(output.exists());
+    assert!(
+        is_animated_webp(&output),
+        "video → webp should remain animated WebP"
+    );
 }
