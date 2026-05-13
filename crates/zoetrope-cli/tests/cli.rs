@@ -1209,3 +1209,101 @@ fn test_video_to_webp_still_animated_regression() {
         "video → webp should remain animated WebP"
     );
 }
+
+#[test]
+fn test_video_with_explicit_height_stretches() {
+    // Video path: --width and --height together must stretch via ffmpeg's
+    // scale filter (W:H, not W:-1). 640x480 mov → 320x320 (squished 4:3→1:1).
+    let dir = TempDir::new().unwrap();
+    let input = mov_fixture(dir.path());
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "320", "--height", "320"])
+        .args(["-F", "gif"])
+        .assert()
+        .success();
+
+    let (w, h, _) = decode_gif(&dir.path().join("in.gif"));
+    assert_eq!((w as u32, h as u32), (320, 320));
+}
+
+#[test]
+fn test_batch_image_conversion_to_output_dir() {
+    // Still-image batch mode: two PNG inputs → --output-dir, each gets its
+    // own .webp output next to the others. Exercises resolve_output_path and
+    // the duplicate-output guard for the still-image path.
+    let dir = TempDir::new().unwrap();
+    let a = image_fixture(dir.path(), "alpha", "png", (800, 600));
+    let b = image_fixture(dir.path(), "beta", "png", (1024, 768));
+    let out_dir = dir.path().join("out");
+
+    zoetrope()
+        .args([a.as_os_str(), b.as_os_str()])
+        .args(["--output-dir".as_ref(), out_dir.as_os_str()])
+        .args(["--width", "320"])
+        .args(["-F", "webp"])
+        .assert()
+        .success();
+
+    let out_a = out_dir.join("alpha.webp");
+    let out_b = out_dir.join("beta.webp");
+    assert!(out_a.exists(), "alpha.webp should exist");
+    assert!(out_b.exists(), "beta.webp should exist");
+    assert_eq!(decode_image_dims(&out_a), (320, 240));
+    assert_eq!(decode_image_dims(&out_b), (320, 240));
+}
+
+#[test]
+fn test_width_zero_rejected() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+
+    zoetrope()
+        .arg(&input)
+        .args(["--width", "0"])
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--width must be greater than zero",
+        ));
+}
+
+#[test]
+fn test_height_zero_rejected() {
+    let dir = TempDir::new().unwrap();
+    let input = png_fixture(dir.path(), (640, 480));
+
+    zoetrope()
+        .arg(&input)
+        .args(["--height", "0"])
+        .args(["-F", "webp"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--height must be greater than zero",
+        ));
+}
+
+#[test]
+fn test_uppercase_extension_accepted() {
+    // Both input detection (`is_still_image_path`) and output format inference
+    // (`format_from_path`) lowercase the extension before matching. Lock that
+    // in so a regression doesn't silently reject `.PNG` files on case-
+    // preserving filesystems.
+    let dir = TempDir::new().unwrap();
+    let lower = image_fixture(dir.path(), "in", "png", (640, 480));
+    let upper = dir.path().join("IN.PNG");
+    std::fs::rename(&lower, &upper).unwrap();
+
+    let output = dir.path().join("OUT.WEBP");
+    zoetrope()
+        .arg(&upper)
+        .args(["--width", "320"])
+        .args(["-o".as_ref(), output.as_os_str()])
+        .assert()
+        .success();
+
+    assert_eq!(decode_image_dims(&output), (320, 240));
+}

@@ -113,8 +113,7 @@ pub fn decode_gif(path: &Path) -> (u16, u16, usize) {
 /// Decode the dimensions of any still image format the `image` crate
 /// understands (png, jpg, webp, gif first frame). Returns `(width, height)`.
 pub fn decode_image_dims(path: &Path) -> (u32, u32) {
-    let img = image::open(path)
-        .unwrap_or_else(|e| panic!("decode {}: {e}", path.display()));
+    let img = image::open(path).unwrap_or_else(|e| panic!("decode {}: {e}", path.display()));
     (img.width(), img.height())
 }
 
@@ -123,11 +122,11 @@ pub fn decode_image_dims(path: &Path) -> (u32, u32) {
 /// `VP8X` chunks. Used to assert that still-image inputs produce still
 /// WebPs, not 1-frame animations.
 pub fn is_animated_webp(path: &Path) -> bool {
+    // Animated WebPs contain `ANIM` (container) and `ANMF` (per-frame) FourCC
+    // chunks; still WebPs do not. We scan the raw bytes for either marker
+    // rather than parsing the RIFF structure — sufficient for the small
+    // synthetic fixtures here, where collision with VP8 payload bytes is
+    // negligible.
     let bytes = std::fs::read(path).expect("read webp");
-    // RIFF header is 12 bytes; chunks start at offset 12.
-    // Each chunk: 4-byte FourCC + 4-byte LE size + payload (padded to even).
-    // For animated WebPs the VP8X header's ANIM bit is set and an `ANIM`
-    // chunk follows. A simple substring scan of the chunk-FourCC region is
-    // sufficient here — these test fixtures are small.
     bytes.windows(4).any(|w| w == b"ANIM" || w == b"ANMF")
 }
