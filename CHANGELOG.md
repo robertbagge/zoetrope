@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/robertbagge/zoetrope/compare/v0.5.0...v0.6.0) (2026-05-13)
+
+
+### Features
+
+* **cli:** add --height flag and PNG/JPEG output formats ([f05bfbc](https://github.com/robertbagge/zoetrope/commit/f05bfbc5cf65b0125726546c08d21a6c17573e3d))
+* **cli:** tighten --height help text ([3c6641f](https://github.com/robertbagge/zoetrope/commit/3c6641ffa36c15a63835da850385e5080ae25923))
+* **core:** reject zero-dim flags and improve still-input errors ([eeddcaa](https://github.com/robertbagge/zoetrope/commit/eeddcaae42a5ce7962714979d5bc8675dea0c568))
+* **core:** support still-image inputs and PNG/JPEG outputs ([40f8fa5](https://github.com/robertbagge/zoetrope/commit/40f8fa540bc11747edf830c1fbb5a13e94e958c7))
+
+
+### Bug Fixes
+
+* **ci:** move release-please to repo root with simple strategy ([667b735](https://github.com/robertbagge/zoetrope/commit/667b735210a21636b24cd06e40d1d631a03cf56f))
+* **ci:** move release-please to repo root with simple strategy ([b73d95b](https://github.com/robertbagge/zoetrope/commit/b73d95b42cfbe67a47b05e12a7978ab08202f34e))
+* **ci:** use literal version in zoetrope-cli for release-please ([a9c4461](https://github.com/robertbagge/zoetrope/commit/a9c44611c1405891a643754459dd319edfd6239c))
+* **ci:** use literal version in zoetrope-cli for release-please ([d4c854f](https://github.com/robertbagge/zoetrope/commit/d4c854fe52a4a81f083b029b0c8a019341d0241c))
+* encode WebP via in-process libwebp instead of ffmpeg's encoder ([6cfacf6](https://github.com/robertbagge/zoetrope/commit/6cfacf6ab854b1ca2acff9aca303e8284c2337a2))
+
 ## [0.5.0](https://github.com/robertbagge/zoetrope/compare/v0.4.0...v0.5.0) (2026-04-26)
 
 
